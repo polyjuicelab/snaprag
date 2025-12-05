@@ -1,7 +1,11 @@
 //! HTTP server implementation
 
 use std::sync::Arc;
+use std::time::Instant;
 
+use axum::extract::Request;
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::Router;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::Any;
@@ -27,6 +31,23 @@ use crate::database::Database;
 use crate::embeddings::EmbeddingService;
 use crate::llm::LlmService;
 use crate::Result;
+
+/// Access log middleware to log all HTTP requests
+async fn access_log_middleware(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let uri = request.uri().clone();
+    let start = Instant::now();
+
+    // Use info! without target to ensure it shows up
+    tracing::info!("→ {} {}", method, uri);
+
+    let response = next.run(request).await;
+    let duration = start.elapsed();
+
+    tracing::info!("← {} {}ms", response.status(), duration.as_millis());
+
+    response
+}
 
 /// Start the API server
 pub async fn serve_api(
@@ -227,9 +248,19 @@ pub async fn serve_api(
         info!("🔐 Backend API key middleware enabled");
     }
 
-    // Add middleware layers
+    // Add middleware layers with detailed request/response logging
+    // Use custom access log middleware for reliable logging
     app = app
-        .layer(TraceLayer::new_for_http())
+        .layer(axum::middleware::from_fn(access_log_middleware))
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
+                tracing::debug_span!(
+                    "http_request",
+                    method = %request.method(),
+                    uri = %request.uri(),
+                )
+            }),
+        )
         .layer(CompressionLayer::new());
 
     // Add CORS if enabled
