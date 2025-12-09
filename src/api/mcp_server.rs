@@ -1,12 +1,7 @@
-//! HTTP server implementation
+//! MCP (Model Context Protocol) server implementation
 
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
 
-use axum::extract::Request;
-use axum::middleware::Next;
-use axum::response::Response;
 use axum::Router;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::Any;
@@ -17,37 +12,18 @@ use tracing::info;
 use crate::api::cache::CacheService;
 use crate::api::handlers::AppState;
 use crate::api::mcp;
-use crate::api::metrics;
 #[cfg(feature = "payment")]
 use crate::api::payment_middleware::smart_payment_middleware;
 #[cfg(feature = "payment")]
 use crate::api::payment_middleware::PaymentMiddlewareState;
-use crate::api::routes;
 use crate::config::AppConfig;
 use crate::database::Database;
 use crate::embeddings::EmbeddingService;
 use crate::llm::LlmService;
 use crate::Result;
 
-/// Access log middleware to log all HTTP requests
-async fn access_log_middleware(request: Request, next: Next) -> Response {
-    let method = request.method().clone();
-    let uri = request.uri().clone();
-    let start = Instant::now();
-
-    // Use info! without target to ensure it shows up
-    tracing::info!("→ {} {}", method, uri);
-
-    let response = next.run(request).await;
-    let duration = start.elapsed();
-
-    tracing::info!("← {} {}ms", response.status(), duration.as_millis());
-
-    response
-}
-
-/// Start the API server (RESTful API only)
-pub async fn serve_api(
+/// Start the MCP server
+pub async fn serve_mcp(
     config: &AppConfig,
     host: String,
     port: u16,
@@ -56,18 +32,7 @@ pub async fn serve_api(
     #[cfg(feature = "payment")] payment_address: Option<String>,
     #[cfg(feature = "payment")] testnet: bool,
 ) -> Result<()> {
-    info!("🚀 Starting SnapRAG API server...");
-
-    // Initialize Prometheus metrics
-    match metrics::init_metrics() {
-        Ok(_) => {
-            info!("✅ Prometheus metrics initialized");
-            info!("📊 Metrics endpoint available at: http://{host}:{port}/api/metrics");
-        }
-        Err(e) => {
-            tracing::warn!("⚠️  Failed to initialize metrics: {}", e);
-        }
-    }
+    info!("🚀 Starting SnapRAG MCP server...");
 
     // Initialize services
     let database = Arc::new(Database::from_config(config).await?);
@@ -99,7 +64,25 @@ pub async fn serve_api(
     let session_manager = Arc::new(crate::api::session::SessionManager::new(3600));
     info!("Session manager initialized (timeout: 1 hour)");
 
-    // Initialize cache service with Redis
+    // Initialize Redis client if configured
+    let redis_client = if let Some(redis_cfg) = &config.redis {
+        info!("🔧 Initializing Redis client...");
+        match crate::api::redis_client::RedisClient::connect(redis_cfg) {
+            Ok(client) => {
+                info!("✅ Redis client initialized");
+                Some(Arc::new(client))
+            }
+            Err(e) => {
+                tracing::error!("❌ Failed to connect to Redis: {}", e);
+                None
+            }
+        }
+    } else {
+        info!("⚠️ Redis not configured, skipping Redis client initialization");
+        None
+    };
+
+    // Initialize cache service
     info!("🔧 Initializing cache service...");
     info!("  Cache enabled: {}", config.cache.enabled);
     info!("  Profile TTL: {} seconds", config.cache.profile_ttl_secs);
@@ -114,36 +97,44 @@ pub async fn serve_api(
                 profile_ttl: std::time::Duration::from_secs(config.cache.profile_ttl_secs),
                 social_ttl: std::time::Duration::from_secs(config.cache.social_ttl_secs),
                 mbti_ttl: std::time::Duration::from_secs(7200), // 2 hours for MBTI
-                stale_threshold: Duration::from_secs(0), // No stale threshold - expired data is permanently available
+                stale_threshold: std::time::Duration::from_secs(0), // No stale threshold - expired data is permanently available
                 enable_stats: config.cache.enable_stats,
             },
         ))
     } else {
-        return Err(crate::SnapRagError::Custom(
-            "Redis configuration is required for cache service".to_string(),
-        ));
+        info!("⚠️ Cache service disabled (Redis not configured)");
+        // Create a dummy cache service that will always return misses
+        // This is needed for the AppState, but won't actually cache anything
+        let dummy_redis = Arc::new(
+            crate::api::redis_client::RedisClient::connect(&crate::config::RedisConfig {
+                url: "redis://127.0.0.1:6379".to_string(),
+                namespace: "snaprag:".to_string(),
+                default_ttl_secs: 2592000,
+                stale_threshold_secs: 300,
+                refresh_channel: "snaprag.refresh".to_string(),
+            })
+            .unwrap_or_else(|_| {
+                panic!("Failed to create dummy Redis client - this should not happen")
+            }),
+        );
+        Arc::new(CacheService::with_config(
+            dummy_redis,
+            crate::api::cache::CacheConfig::default(),
+        ))
     };
 
-    if config.cache.enabled {
-        info!("✅ Cache service initialized (enabled) with Redis");
-        info!("  Profile TTL: {} seconds", config.cache.profile_ttl_secs);
-        info!("  Social TTL: {} seconds", config.cache.social_ttl_secs);
-    } else {
-        info!("⚠️ Cache service disabled in configuration");
-    }
-
+    // Create application state
     let state = AppState {
-        config: Arc::new(config.clone()),
         database,
         embedding_service,
         llm_service,
         lazy_loader,
         session_manager,
         cache_service,
+        config: Arc::new(config.clone()),
     };
 
-    // Build API routes
-    let api_router = routes::api_routes(state.clone());
+    // Build MCP routes
     let mcp_router = mcp::mcp_routes(state.clone());
 
     // Combine routes with optional payment middleware
@@ -171,7 +162,7 @@ pub async fn serve_api(
         }
 
         // Create base URL for payment requirements
-        let base_url = format!("http://{host}:{port}/api");
+        let base_url = format!("http://{host}:{port}/mcp");
         info!("🔗 Payment base URL: {}", base_url);
 
         // Create payment middleware state
@@ -183,44 +174,38 @@ pub async fn serve_api(
             config.x402.rpc_url.clone(),
         );
 
-        // Apply payment middleware to API routes
-        let protected_api = api_router.layer(axum::middleware::from_fn_with_state(
-            payment_state.clone(),
-            smart_payment_middleware,
-        ));
-
-        // MCP routes also protected
+        // Apply payment middleware to MCP routes
         let protected_mcp = mcp_router.layer(axum::middleware::from_fn_with_state(
             payment_state,
             smart_payment_middleware,
         ));
 
-        app = Router::new()
-            .nest("/api", protected_api)
-            .nest("/mcp", protected_mcp);
+        app = Router::new().nest("/mcp", protected_mcp);
 
-        info!("🔒 Payment middleware applied to /api and /mcp routes");
+        info!("🔒 Payment middleware applied to /mcp routes");
     } else {
-        app = Router::new()
-            .nest("/api", api_router)
-            .nest("/mcp", mcp_router);
+        app = Router::new().nest("/mcp", mcp_router);
         info!("💡 Payment disabled - all endpoints are free");
     }
 
     #[cfg(not(feature = "payment"))]
     {
-        app = Router::new()
-            .nest("/api", api_router)
-            .nest("/mcp", mcp_router);
+        app = Router::new().nest("/mcp", mcp_router);
         info!("💡 Payment feature not compiled - all endpoints are free");
     }
 
-    // Cache-server mode removed - using Redis-based cache with worker pattern
+    // Add middleware
+    if enable_cors {
+        app = app.layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        );
+        info!("🌐 CORS enabled");
+    }
 
-    // Add middleware layers with detailed request/response logging
-    // Use custom access log middleware for reliable logging
     app = app
-        .layer(axum::middleware::from_fn(access_log_middleware))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &axum::http::Request<_>| {
                 tracing::debug_span!(
@@ -232,43 +217,18 @@ pub async fn serve_api(
         )
         .layer(CompressionLayer::new());
 
-    // Add CORS if enabled
-    if enable_cors {
-        info!("✅ CORS enabled");
-        let cors = CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any);
-        app = app.layer(cors);
-    }
-
-    // Start server
+    // Bind and serve
     let addr = format!("{host}:{port}");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-
-    info!("🌐 API server listening on http://{}", addr);
-    info!("📋 RESTful API available at http://{}/api", addr);
-    info!("🔌 MCP service available at http://{}/mcp", addr);
+    info!("✅ MCP server listening on {}", addr);
     info!("");
 
-    #[cfg(feature = "payment")]
-    if payment_enabled {
-        info!("💰 Payment Information:");
-        info!("  Free:     /api/health, /api/stats");
-        info!("  $0.001:   /api/profiles");
-        info!("  $0.01:    /api/search/*");
-        info!("  $0.1:     /api/rag/query");
-        info!("");
-    }
-
-    info!("Available endpoints:");
-    info!("  GET  /api/health         - Health check");
-    info!("  GET  /api/profiles       - List profiles");
-    info!("  GET  /api/profiles/:fid  - Get profile by FID");
-    info!("  POST /api/search/profiles - Search profiles");
-    info!("  POST /api/search/casts   - Search casts");
-    info!("  POST /api/rag/query      - RAG query");
-    info!("  GET  /api/stats          - Statistics");
+    info!("📋 Available endpoints:");
+    info!("  GET  /mcp/               - MCP server info");
+    info!("  GET  /mcp/resources      - List MCP resources");
+    info!("  GET  /mcp/tools          - List MCP tools");
+    info!("  POST /mcp/tools/call     - Call MCP tool");
+    info!("");
 
     axum::serve(listener, app).await?;
 
