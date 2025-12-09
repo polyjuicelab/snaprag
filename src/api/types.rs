@@ -163,7 +163,7 @@ const fn default_max_tokens() -> usize {
 }
 
 /// Profile response
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileResponse {
     pub fid: i64,
     pub username: Option<String>,

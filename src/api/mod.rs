@@ -1,10 +1,9 @@
 //! API server module for serving read-only services via REST and MCP
 
-pub mod backend_api_key;
 pub mod cache;
-pub mod cache_proxy;
 pub mod handlers;
 pub mod mcp;
+pub mod mcp_server;
 pub mod metrics;
 #[cfg(feature = "payment")]
 pub mod payment_middleware;
@@ -15,4 +14,5 @@ pub mod server;
 pub mod session;
 pub mod types;
 
+pub use mcp_server::serve_mcp;
 pub use server::serve_api;

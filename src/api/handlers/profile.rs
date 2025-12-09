@@ -17,25 +17,71 @@ use crate::models::UserProfileQuery;
 pub async fn get_profile(
     State(state): State<AppState>,
     Path(fid): Path<i64>,
-) -> Result<Json<ApiResponse<ProfileResponse>>, StatusCode> {
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     let start_time = std::time::Instant::now();
     info!("GET /api/profiles/{}", fid);
 
     // Check cache first if enabled
     tracing::debug!("Checking cache for profile FID {}", fid);
-    if let Some(cached_profile) = state.cache_service.get_profile(fid).await {
-        let duration = start_time.elapsed();
-        info!(
-            "📦 Profile cache hit for FID {} - {}ms",
-            fid,
-            duration.as_millis()
-        );
-        return Ok(Json(ApiResponse::success(cached_profile)));
+    match state.cache_service.get_profile(fid).await {
+        Ok(crate::api::cache::CacheResult::Fresh(cached_profile)) => {
+            let duration = start_time.elapsed();
+            info!(
+                "📦 Profile cache hit (fresh) for FID {} - {}ms",
+                fid,
+                duration.as_millis()
+            );
+            let profile_data = serde_json::to_value(&cached_profile).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(profile_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Stale(cached_profile)) => {
+            let duration = start_time.elapsed();
+            info!(
+                "📦 Profile cache hit (stale) for FID {} - {}ms",
+                fid,
+                duration.as_millis()
+            );
+            let profile_data = serde_json::to_value(&cached_profile).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(profile_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Updating(cached_profile)) => {
+            let duration = start_time.elapsed();
+            info!(
+                "🔄 Profile cache expired (updating) for FID {} - {}ms",
+                fid,
+                duration.as_millis()
+            );
+            // Return with updating status
+            let profile_data = serde_json::to_value(&cached_profile).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(serde_json::json!({
+                "status": "updating",
+                "data": profile_data,
+                "message": "Profile data is being updated in the background. Please refresh to get the latest data."
+            }))));
+        }
+        Ok(crate::api::cache::CacheResult::Miss) => {
+            tracing::debug!(
+                "No cache hit for profile FID {}, proceeding to database",
+                fid
+            );
+        }
+        Err(e) => {
+            error!("Cache error for FID {}: {}", fid, e);
+            // Continue to database
+        }
     }
-    tracing::debug!(
-        "No cache hit for profile FID {}, proceeding to database",
-        fid
-    );
 
     // Try database first
     let profile = match state.database.get_user_profile(fid).await {
@@ -84,7 +130,9 @@ pub async fn get_profile(
 
         // Cache the response
         tracing::debug!("Caching profile response for FID {}", fid);
-        state.cache_service.set_profile(fid, response.clone()).await;
+        if let Err(e) = state.cache_service.set_profile(fid, &response).await {
+            error!("Failed to cache profile: {}", e);
+        }
 
         let duration = start_time.elapsed();
         info!(
@@ -92,7 +140,12 @@ pub async fn get_profile(
             fid,
             duration.as_millis()
         );
-        Ok(Json(ApiResponse::success(response)))
+        let response_data = serde_json::to_value(&response).unwrap_or_else(|_| {
+            serde_json::json!({
+                "error": "Failed to serialize profile response"
+            })
+        });
+        Ok(Json(ApiResponse::success(response_data)))
     } else {
         let duration = start_time.elapsed();
         info!(
@@ -108,7 +161,7 @@ pub async fn get_profile(
 pub async fn list_profiles(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
-) -> Result<Json<ApiResponse<Vec<ProfileResponse>>>, StatusCode> {
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     info!("GET /api/profiles?q={}&limit={}", params.q, params.limit);
 
     let query = UserProfileQuery {
@@ -148,7 +201,12 @@ pub async fn list_profiles(
                     github_username: p.github_username,
                 })
                 .collect();
-            Ok(Json(ApiResponse::success(response)))
+            let response_data = serde_json::to_value(&response).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize profile response"
+                })
+            });
+            Ok(Json(ApiResponse::success(response_data)))
         }
         Err(e) => {
             error!("Error listing profiles: {}", e);
@@ -161,7 +219,7 @@ pub async fn list_profiles(
 pub async fn get_profile_by_username(
     State(state): State<AppState>,
     Path(username): Path<String>,
-) -> Result<Json<ApiResponse<ProfileResponse>>, StatusCode> {
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     info!("GET /api/profiles/username/{}", username);
 
     // Try database first
@@ -202,12 +260,20 @@ pub async fn get_profile_by_username(
             };
 
             // Cache the response by FID (since username lookups are less common)
-            state
+            if let Err(e) = state
                 .cache_service
-                .set_profile(profile.fid, response.clone())
-                .await;
+                .set_profile(profile.fid, &response)
+                .await
+            {
+                error!("Failed to cache profile: {}", e);
+            }
 
-            Ok(Json(ApiResponse::success(response)))
+            let response_data = serde_json::to_value(&response).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize profile response"
+                })
+            });
+            Ok(Json(ApiResponse::success(response_data)))
         }
         None => Err(StatusCode::NOT_FOUND),
     }
