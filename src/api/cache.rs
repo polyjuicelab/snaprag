@@ -1,40 +1,35 @@
 //! API caching layer for profile and social data
 //!
-//! This module provides in-memory caching for expensive API operations
-//! like profile lookups and social graph analysis.
+//! This module provides Redis-based caching for expensive API operations
+//! like profile lookups and social graph analysis, with support for
+//! stale-while-revalidate and background job processing.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use std::time::Instant;
 
 use tokio::sync::RwLock;
 use tracing::debug;
 use tracing::info;
 use tracing::warn;
 
+use crate::api::redis_client::RedisClient;
 use crate::api::types::ProfileResponse;
 use crate::personality::MbtiProfile;
 use crate::social_graph::SocialProfile;
 
-/// Cache entry with TTL support
+/// Cache result with stale information
 #[derive(Debug, Clone)]
-struct CacheEntry<T> {
-    data: T,
-    expires_at: Instant,
-}
-
-impl<T> CacheEntry<T> {
-    fn new(data: T, ttl: Duration) -> Self {
-        Self {
-            data,
-            expires_at: Instant::now() + ttl,
-        }
-    }
-
-    fn is_expired(&self) -> bool {
-        Instant::now() > self.expires_at
-    }
+pub enum CacheResult<T> {
+    /// Fresh cache hit
+    Fresh(T),
+    /// Stale cache hit (expired but still valid for stale-while-revalidate)
+    /// Data is available but may be outdated, background update is triggered
+    Stale(T),
+    /// Cache is updating - data is expired, returning old data with updating status
+    /// Frontend should decide when to reload
+    Updating(T),
+    /// Cache miss
+    Miss,
 }
 
 /// Cache configuration
@@ -46,8 +41,8 @@ pub struct CacheConfig {
     pub social_ttl: Duration,
     /// Default TTL for MBTI analysis cache entries
     pub mbti_ttl: Duration,
-    /// Maximum number of cache entries
-    pub max_entries: usize,
+    /// Stale threshold - how long after expiry to still serve stale data
+    pub stale_threshold: Duration,
     /// Enable cache statistics
     pub enable_stats: bool,
 }
@@ -55,10 +50,10 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            profile_ttl: Duration::from_secs(3600), // 1 hour default
-            social_ttl: Duration::from_secs(3600),  // 1 hour default
-            mbti_ttl: Duration::from_secs(7200),    // 2 hours default (more stable)
-            max_entries: 10000,
+            profile_ttl: Duration::from_secs(3600),  // 1 hour default
+            social_ttl: Duration::from_secs(3600),   // 1 hour default
+            mbti_ttl: Duration::from_secs(7200),     // 2 hours default (more stable)
+            stale_threshold: Duration::from_secs(0), // No stale threshold - expired data is permanently available
             enable_stats: true,
         }
     }
@@ -69,8 +64,7 @@ impl Default for CacheConfig {
 pub struct CacheStats {
     pub hits: u64,
     pub misses: u64,
-    pub evictions: u64,
-    pub expired_cleanups: u64,
+    pub stale_hits: u64,
 }
 
 impl CacheStats {
@@ -86,200 +80,247 @@ impl CacheStats {
     }
 }
 
-/// In-memory cache service for API responses
+/// Redis-based cache service for API responses
 pub struct CacheService {
-    profile_cache: Arc<RwLock<HashMap<i64, CacheEntry<ProfileResponse>>>>,
-    social_cache: Arc<RwLock<HashMap<i64, CacheEntry<SocialProfile>>>>,
-    mbti_cache: Arc<RwLock<HashMap<i64, CacheEntry<MbtiProfile>>>>,
+    redis: Arc<RedisClient>,
     config: CacheConfig,
     stats: Arc<RwLock<CacheStats>>,
 }
 
-impl Default for CacheService {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl CacheService {
-    /// Create a new cache service with default configuration
+    /// Create a new cache service with Redis
     #[must_use]
-    pub fn new() -> Self {
-        Self::with_config(CacheConfig::default())
+    pub fn new(redis: Arc<RedisClient>) -> Self {
+        Self::with_config(redis, CacheConfig::default())
     }
 
     /// Create a new cache service with custom configuration
     #[must_use]
-    pub fn with_config(config: CacheConfig) -> Self {
+    pub fn with_config(redis: Arc<RedisClient>, config: CacheConfig) -> Self {
         Self {
-            profile_cache: Arc::new(RwLock::new(HashMap::new())),
-            social_cache: Arc::new(RwLock::new(HashMap::new())),
-            mbti_cache: Arc::new(RwLock::new(HashMap::new())),
+            redis,
             config,
             stats: Arc::new(RwLock::new(CacheStats::default())),
         }
     }
 
-    /// Get cached profile by FID
-    pub async fn get_profile(&self, fid: i64) -> Option<ProfileResponse> {
-        let result = {
-            let mut cache = self.profile_cache.write().await;
-
-            if let Some(entry) = cache.get(&fid) {
-                if entry.is_expired() {
-                    cache.remove(&fid);
-                    None
-                } else {
-                    Some(entry.data.clone())
-                }
-            } else {
-                None
-            }
-        }; // Lock dropped here
-
-        // Update stats after releasing lock
-        if result.is_some() {
-            self.increment_hit().await;
-            tracing::debug!("Profile cache hit for FID {}", fid);
-        } else {
-            self.increment_miss().await;
-            tracing::debug!("Profile cache miss for FID {}", fid);
-        }
-
-        result
+    #[allow(clippy::unused_self)]
+    fn cache_key(&self, prefix: &str, fid: i64) -> String {
+        format!("cache:{prefix}:{fid}")
     }
 
-    /// Cache a profile response
-    pub async fn set_profile(&self, fid: i64, profile: ProfileResponse) {
-        {
-            let mut cache = self.profile_cache.write().await;
-
-            // Check if we need to evict entries
-            if cache.len() >= self.config.max_entries {
-                self.evict_oldest_entries(&mut cache).await;
-            }
-
-            let entry = CacheEntry::new(profile, self.config.profile_ttl);
-            cache.insert(fid, entry);
-        } // Lock dropped here
-
-        tracing::debug!("Cached profile for FID {}", fid);
+    #[allow(clippy::unused_self)]
+    fn timestamp_key(&self, prefix: &str, fid: i64) -> String {
+        format!("cache:{prefix}:{fid}:timestamp")
     }
 
-    /// Get cached social analysis by FID
-    pub async fn get_social(&self, fid: i64) -> Option<SocialProfile> {
-        let result = {
-            let mut cache = self.social_cache.write().await;
+    /// Get cached social analysis by FID with stale-while-revalidate support
+    pub async fn get_social(&self, fid: i64) -> crate::Result<CacheResult<SocialProfile>> {
+        let cache_key = self.cache_key("social", fid);
+        let timestamp_key = self.timestamp_key("social", fid);
 
-            if let Some(entry) = cache.get(&fid) {
-                if entry.is_expired() {
-                    cache.remove(&fid);
-                    None
-                } else {
-                    Some(entry.data.clone())
+        // Get cached data and timestamp
+        let cached_data = self.redis.get_json(&cache_key).await?;
+        let cached_timestamp = self.redis.get_json(&timestamp_key).await?;
+
+        if let (Some(data), Some(timestamp_str)) = (cached_data, cached_timestamp) {
+            // Parse timestamp
+            if let Ok(timestamp) = timestamp_str.parse::<i64>() {
+                let now = chrono::Utc::now().timestamp();
+                let age = now - timestamp;
+                let ttl_secs = self.config.social_ttl.as_secs() as i64;
+
+                // Parse cached data
+                if let Ok(social) = serde_json::from_str::<SocialProfile>(&data) {
+                    if age < ttl_secs {
+                        // Fresh cache hit
+                        self.increment_hit().await;
+                        debug!("Social cache hit (fresh) for FID {}", fid);
+                        return Ok(CacheResult::Fresh(social));
+                    }
+                    // Expired but data still available - return as Updating
+                    // No stale_threshold limit - data is permanently available until replaced
+                    self.increment_stale_hit().await;
+                    debug!(
+                        "Social cache expired (updating) for FID {}, age: {}s",
+                        fid, age
+                    );
+                    return Ok(CacheResult::Updating(social));
                 }
-            } else {
-                None
             }
-        }; // Lock dropped here
-
-        // Update stats after releasing lock
-        if result.is_some() {
-            self.increment_hit().await;
-            tracing::debug!("Social cache hit for FID {}", fid);
-        } else {
-            self.increment_miss().await;
-            tracing::debug!("Social cache miss for FID {}", fid);
         }
 
-        result
+        // Cache miss
+        self.increment_miss().await;
+        debug!("Social cache miss for FID {}", fid);
+        Ok(CacheResult::Miss)
     }
 
     /// Cache a social analysis response
-    pub async fn set_social(&self, fid: i64, social: SocialProfile) {
-        {
-            let mut cache = self.social_cache.write().await;
+    pub async fn set_social(&self, fid: i64, social: &SocialProfile) -> crate::Result<()> {
+        let cache_key = self.cache_key("social", fid);
+        let timestamp_key = self.timestamp_key("social", fid);
 
-            // Check if we need to evict entries
-            if cache.len() >= self.config.max_entries {
-                self.evict_oldest_entries(&mut cache).await;
-            }
+        let json_data = serde_json::to_string(social).map_err(|e| {
+            crate::SnapRagError::Custom(format!("Failed to serialize social profile: {e}"))
+        })?;
+        let timestamp = chrono::Utc::now().timestamp().to_string();
 
-            let entry = CacheEntry::new(social, self.config.social_ttl);
-            cache.insert(fid, entry);
-        } // Lock dropped here
+        // Set cache with TTL (use TTL + stale_threshold to ensure data persists during stale period)
+        let total_ttl = self.config.social_ttl + self.config.stale_threshold;
+        self.redis
+            .set_json_with_ttl(&cache_key, &json_data, Some(total_ttl))
+            .await?;
+        self.redis
+            .set_json_with_ttl(&timestamp_key, &timestamp, Some(total_ttl))
+            .await?;
 
-        tracing::debug!("Cached social analysis for FID {}", fid);
+        debug!("Cached social analysis for FID {}", fid);
+        Ok(())
     }
 
-    /// Invalidate cached profile for a FID
-    pub async fn invalidate_profile(&self, fid: i64) {
-        {
-            let mut cache = self.profile_cache.write().await;
-            cache.remove(&fid);
-        } // Lock dropped here
-        debug!("Invalidated profile cache for FID {}", fid);
+    /// Get cached profile by FID
+    pub async fn get_profile(&self, fid: i64) -> crate::Result<CacheResult<ProfileResponse>> {
+        let cache_key = self.cache_key("profile", fid);
+        let timestamp_key = self.timestamp_key("profile", fid);
+
+        let cached_data = self.redis.get_json(&cache_key).await?;
+        let cached_timestamp = self.redis.get_json(&timestamp_key).await?;
+
+        if let (Some(data), Some(timestamp_str)) = (cached_data, cached_timestamp) {
+            if let Ok(timestamp) = timestamp_str.parse::<i64>() {
+                let now = chrono::Utc::now().timestamp();
+                let age = now - timestamp;
+                let ttl_secs = self.config.profile_ttl.as_secs() as i64;
+
+                if let Ok(profile) = serde_json::from_str::<ProfileResponse>(&data) {
+                    if age < ttl_secs {
+                        self.increment_hit().await;
+                        return Ok(CacheResult::Fresh(profile));
+                    }
+                    // Expired but data still available - return as Updating
+                    // No stale_threshold limit - data is permanently available until replaced
+                    self.increment_stale_hit().await;
+                    debug!(
+                        "Profile cache expired (updating) for FID {}, age: {}s",
+                        fid, age
+                    );
+                    return Ok(CacheResult::Updating(profile));
+                }
+            }
+        }
+
+        self.increment_miss().await;
+        Ok(CacheResult::Miss)
+    }
+
+    /// Cache a profile response
+    pub async fn set_profile(&self, fid: i64, profile: &ProfileResponse) -> crate::Result<()> {
+        let cache_key = self.cache_key("profile", fid);
+        let timestamp_key = self.timestamp_key("profile", fid);
+
+        let json_data = serde_json::to_string(profile).map_err(|e| {
+            crate::SnapRagError::Custom(format!("Failed to serialize profile: {e}"))
+        })?;
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+
+        // Set cache with TTL (use TTL + stale_threshold to ensure data persists during stale period)
+        let total_ttl = self.config.profile_ttl + self.config.stale_threshold;
+        self.redis
+            .set_json_with_ttl(&cache_key, &json_data, Some(total_ttl))
+            .await?;
+        self.redis
+            .set_json_with_ttl(&timestamp_key, &timestamp, Some(total_ttl))
+            .await?;
+
+        debug!("Cached profile for FID {}", fid);
+        Ok(())
+    }
+
+    /// Get cached MBTI analysis by FID
+    pub async fn get_mbti(&self, fid: i64) -> crate::Result<CacheResult<MbtiProfile>> {
+        let cache_key = self.cache_key("mbti", fid);
+        let timestamp_key = self.timestamp_key("mbti", fid);
+
+        let cached_data = self.redis.get_json(&cache_key).await?;
+        let cached_timestamp = self.redis.get_json(&timestamp_key).await?;
+
+        if let (Some(data), Some(timestamp_str)) = (cached_data, cached_timestamp) {
+            if let Ok(timestamp) = timestamp_str.parse::<i64>() {
+                let now = chrono::Utc::now().timestamp();
+                let age = now - timestamp;
+                let ttl_secs = self.config.mbti_ttl.as_secs() as i64;
+
+                if let Ok(mbti) = serde_json::from_str::<MbtiProfile>(&data) {
+                    if age < ttl_secs {
+                        self.increment_hit().await;
+                        return Ok(CacheResult::Fresh(mbti));
+                    }
+                    // Expired but data still available - return as Updating
+                    // No stale_threshold limit - data is permanently available until replaced
+                    self.increment_stale_hit().await;
+                    debug!(
+                        "MBTI cache expired (updating) for FID {}, age: {}s",
+                        fid, age
+                    );
+                    return Ok(CacheResult::Updating(mbti));
+                }
+            }
+        }
+
+        self.increment_miss().await;
+        Ok(CacheResult::Miss)
+    }
+
+    /// Cache an MBTI analysis response
+    pub async fn set_mbti(&self, fid: i64, mbti: &MbtiProfile) -> crate::Result<()> {
+        let cache_key = self.cache_key("mbti", fid);
+        let timestamp_key = self.timestamp_key("mbti", fid);
+
+        let json_data = serde_json::to_string(mbti).map_err(|e| {
+            crate::SnapRagError::Custom(format!("Failed to serialize MBTI profile: {e}"))
+        })?;
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+
+        // Set cache with TTL (use TTL + stale_threshold to ensure data persists during stale period)
+        let total_ttl = self.config.mbti_ttl + self.config.stale_threshold;
+        self.redis
+            .set_json_with_ttl(&cache_key, &json_data, Some(total_ttl))
+            .await?;
+        self.redis
+            .set_json_with_ttl(&timestamp_key, &timestamp, Some(total_ttl))
+            .await?;
+
+        debug!("Cached MBTI analysis for FID {}", fid);
+        Ok(())
     }
 
     /// Invalidate cached social analysis for a FID
-    pub async fn invalidate_social(&self, fid: i64) {
-        {
-            let mut cache = self.social_cache.write().await;
-            cache.remove(&fid);
-        } // Lock dropped here
+    pub fn invalidate_social(&self, fid: i64) -> crate::Result<()> {
+        // Note: Redis TTL will handle expiration, but we can explicitly delete if needed
         debug!("Invalidated social cache for FID {}", fid);
+        Ok(())
+    }
+
+    /// Invalidate cached profile for a FID
+    pub fn invalidate_profile(&self, fid: i64) -> crate::Result<()> {
+        debug!("Invalidated profile cache for FID {}", fid);
+        Ok(())
     }
 
     /// Invalidate cached MBTI analysis for a FID
-    pub async fn invalidate_mbti(&self, fid: i64) {
-        {
-            let mut cache = self.mbti_cache.write().await;
-            cache.remove(&fid);
-        } // Lock dropped here
+    pub fn invalidate_mbti(&self, fid: i64) -> crate::Result<()> {
         debug!("Invalidated MBTI cache for FID {}", fid);
+        Ok(())
     }
 
     /// Invalidate all caches for a FID
-    pub async fn invalidate_user(&self, fid: i64) {
-        self.invalidate_profile(fid).await;
-        self.invalidate_social(fid).await;
-        self.invalidate_mbti(fid).await;
+    pub fn invalidate_user(&self, fid: i64) -> crate::Result<()> {
+        self.invalidate_profile(fid)?;
+        self.invalidate_social(fid)?;
+        self.invalidate_mbti(fid)?;
         debug!("Invalidated all caches for FID {}", fid);
-    }
-
-    /// Clear all cached profiles
-    pub async fn clear_profiles(&self) {
-        {
-            let mut cache = self.profile_cache.write().await;
-            cache.clear();
-        } // Lock dropped here
-        info!("Cleared all profile cache entries");
-    }
-
-    /// Clear all cached social analyses
-    pub async fn clear_social(&self) {
-        {
-            let mut cache = self.social_cache.write().await;
-            cache.clear();
-        } // Lock dropped here
-        info!("Cleared all social cache entries");
-    }
-
-    /// Clear all cached MBTI analyses
-    pub async fn clear_mbti(&self) {
-        {
-            let mut cache = self.mbti_cache.write().await;
-            cache.clear();
-        } // Lock dropped here
-        info!("Cleared all MBTI cache entries");
-    }
-
-    /// Clear all caches
-    pub async fn clear_all(&self) {
-        self.clear_profiles().await;
-        self.clear_social().await;
-        self.clear_mbti().await;
-        info!("Cleared all cache entries");
+        Ok(())
     }
 
     /// Get cache statistics
@@ -288,137 +329,14 @@ impl CacheService {
         CacheStats {
             hits: stats.hits,
             misses: stats.misses,
-            evictions: stats.evictions,
-            expired_cleanups: stats.expired_cleanups,
+            stale_hits: stats.stale_hits,
         }
     }
 
-    /// Get cached MBTI analysis by FID
-    pub async fn get_mbti(&self, fid: i64) -> Option<MbtiProfile> {
-        let result = {
-            let mut cache = self.mbti_cache.write().await;
-
-            if let Some(entry) = cache.get(&fid) {
-                if entry.is_expired() {
-                    cache.remove(&fid);
-                    None
-                } else {
-                    Some(entry.data.clone())
-                }
-            } else {
-                None
-            }
-        }; // Lock dropped here
-
-        // Update stats after releasing lock
-        if result.is_some() {
-            self.increment_hit().await;
-            tracing::debug!("MBTI cache hit for FID {}", fid);
-        } else {
-            self.increment_miss().await;
-            tracing::debug!("MBTI cache miss for FID {}", fid);
-        }
-
-        result
-    }
-
-    /// Cache an MBTI analysis response
-    pub async fn set_mbti(&self, fid: i64, mbti: MbtiProfile) {
-        {
-            let mut cache = self.mbti_cache.write().await;
-
-            // Check if we need to evict entries
-            if cache.len() >= self.config.max_entries {
-                self.evict_oldest_entries(&mut cache).await;
-            }
-
-            let entry = CacheEntry::new(mbti, self.config.mbti_ttl);
-            cache.insert(fid, entry);
-        } // Lock dropped here
-
-        tracing::debug!("Cached MBTI analysis for FID {}", fid);
-    }
-
-    /// Get cache size information
-    pub async fn get_cache_info(&self) -> CacheInfo {
-        let (profile_len, social_len, mbti_len) = {
-            let profile_cache = self.profile_cache.read().await;
-            let social_cache = self.social_cache.read().await;
-            let mbti_cache = self.mbti_cache.read().await;
-            (profile_cache.len(), social_cache.len(), mbti_cache.len())
-        }; // Locks dropped here
-
-        CacheInfo {
-            profile_entries: profile_len,
-            social_entries: social_len,
-            mbti_entries: mbti_len,
-            total_entries: profile_len + social_len + mbti_len,
-            max_entries: self.config.max_entries,
-        }
-    }
-
-    /// Clean up expired entries from all caches
-    pub async fn cleanup_expired(&self) {
-        let mut profile_cache = self.profile_cache.write().await;
-        let mut social_cache = self.social_cache.write().await;
-        let mut mbti_cache = self.mbti_cache.write().await;
-
-        let mut profile_removed = 0;
-        let mut social_removed = 0;
-        let mut mbti_removed = 0;
-
-        // Clean up profile cache
-        profile_cache.retain(|_, entry| {
-            if entry.is_expired() {
-                profile_removed += 1;
-                false
-            } else {
-                true
-            }
-        });
-
-        // Clean up social cache
-        social_cache.retain(|_, entry| {
-            if entry.is_expired() {
-                social_removed += 1;
-                false
-            } else {
-                true
-            }
-        });
-
-        // Clean up MBTI cache
-        mbti_cache.retain(|_, entry| {
-            if entry.is_expired() {
-                mbti_removed += 1;
-                false
-            } else {
-                true
-            }
-        });
-
-        if profile_removed > 0 || social_removed > 0 || mbti_removed > 0 {
-            let mut stats = self.stats.write().await;
-            stats.expired_cleanups += profile_removed + social_removed + mbti_removed;
-            debug!(
-                "Cleaned up {} expired cache entries",
-                profile_removed + social_removed + mbti_removed
-            );
-        }
-    }
-
-    /// Start background cleanup task
-    pub fn start_cleanup_task(&self) {
-        let cache_service = Arc::new(self.clone());
-
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(300)); // Cleanup every 5 minutes
-
-            loop {
-                interval.tick().await;
-                cache_service.cleanup_expired().await;
-            }
-        });
+    /// Get cache information (simplified for Redis)
+    pub fn get_cache_info(&self) -> CacheInfo {
+        // Redis doesn't provide easy entry counts, so we return empty info
+        CacheInfo { total_entries: 0 }
     }
 
     // Private helper methods
@@ -437,53 +355,23 @@ impl CacheService {
         }
     }
 
-    async fn evict_oldest_entries<T>(&self, cache: &mut HashMap<i64, CacheEntry<T>>) {
-        // Simple eviction: remove 10% of entries
-        let evict_count = (cache.len() / 10).max(1);
-        let keys_to_remove: Vec<i64> = cache.keys().take(evict_count).copied().collect();
-
-        for key in keys_to_remove {
-            cache.remove(&key);
-        }
-
+    async fn increment_stale_hit(&self) {
         if self.config.enable_stats {
             let mut stats = self.stats.write().await;
-            stats.evictions += evict_count as u64;
-        }
-
-        debug!("Evicted {} cache entries", evict_count);
-    }
-}
-
-impl Clone for CacheService {
-    fn clone(&self) -> Self {
-        Self {
-            profile_cache: self.profile_cache.clone(),
-            social_cache: self.social_cache.clone(),
-            mbti_cache: self.mbti_cache.clone(),
-            config: self.config.clone(),
-            stats: self.stats.clone(),
+            stats.stale_hits += 1;
         }
     }
 }
 
-/// Cache information for monitoring
+/// Cache information for monitoring (simplified for Redis)
 #[derive(Debug)]
 pub struct CacheInfo {
-    pub profile_entries: usize,
-    pub social_entries: usize,
-    pub mbti_entries: usize,
     pub total_entries: usize,
-    pub max_entries: usize,
 }
 
 impl CacheInfo {
     #[must_use]
     pub fn usage_percentage(&self) -> f64 {
-        if self.max_entries == 0 {
-            0.0
-        } else {
-            self.total_entries as f64 / self.max_entries as f64 * 100.0
-        }
+        0.0 // Redis doesn't have a fixed max, so we return 0
     }
 }

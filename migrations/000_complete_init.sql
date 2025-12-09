@@ -36,6 +36,10 @@ CREATE INDEX IF NOT EXISTS idx_profile_changes_fid_field_ts
     ON user_profile_changes(fid, field_name, timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_profile_changes_message_hash 
     ON user_profile_changes(message_hash);
+-- Optimized index for username lookups (used by get_user_profile_by_username)
+CREATE INDEX IF NOT EXISTS idx_profile_changes_username_value 
+    ON user_profile_changes(field_value, fid, timestamp DESC) 
+    WHERE field_name = 'username';
 
 -- Reconstructed view: merges field changes into complete profiles
 CREATE OR REPLACE VIEW user_profiles AS

@@ -122,9 +122,16 @@ impl SocialGraphAnalyzer {
 
     /// Analyze user's social profile
     pub async fn analyze_user(&self, fid: i64) -> Result<SocialProfile> {
+        let start_time = std::time::Instant::now();
+
         // Get following list
+        let step_start = std::time::Instant::now();
         let following = self.get_following(fid).await?;
+        tracing::debug!("get_following took {}ms", step_start.elapsed().as_millis());
+
+        let step_start = std::time::Instant::now();
         let followers = self.get_followers(fid).await?;
+        tracing::debug!("get_followers took {}ms", step_start.elapsed().as_millis());
 
         // Calculate influence score
         let influence_score = if following.is_empty() {
@@ -134,7 +141,12 @@ impl SocialGraphAnalyzer {
         };
 
         // Analyze mentions from user's casts (this works even without links data)
+        let step_start = std::time::Instant::now();
         let mentioned_users = self.analyze_mentions(fid).await?;
+        tracing::debug!(
+            "analyze_mentions took {}ms",
+            step_start.elapsed().as_millis()
+        );
 
         // If we have mentioned users, try to categorize them as a proxy for social circles
         let social_circles = if !mentioned_users.is_empty() {
@@ -154,11 +166,32 @@ impl SocialGraphAnalyzer {
         let interaction_style = self.analyze_interaction_style(fid).await?;
 
         // Get top users in each category
+        let step_start = std::time::Instant::now();
         let top_followed = self.get_top_users(&following, 5).await?;
+        tracing::debug!(
+            "get_top_users (following) took {}ms",
+            step_start.elapsed().as_millis()
+        );
+
+        let step_start = std::time::Instant::now();
         let top_followers = self.get_top_users(&followers, 5).await?;
+        tracing::debug!(
+            "get_top_users (followers) took {}ms",
+            step_start.elapsed().as_millis()
+        );
 
         // Generate word cloud from user's casts
+        let step_start = std::time::Instant::now();
         let word_cloud = self.generate_word_cloud(fid).await?;
+        tracing::debug!(
+            "generate_word_cloud took {}ms",
+            step_start.elapsed().as_millis()
+        );
+
+        tracing::info!(
+            "analyze_user total time: {}ms",
+            start_time.elapsed().as_millis()
+        );
 
         Ok(SocialProfile {
             fid,
@@ -706,36 +739,107 @@ impl SocialGraphAnalyzer {
         sorted_mentions.sort_by(|a, b| b.1.cmp(&a.1));
         sorted_mentions.truncate(10);
 
-        // Get user profiles for mentioned users
+        // Get user profiles for mentioned users - batch query to avoid N+1
         let mut result = Vec::new();
+        if sorted_mentions.is_empty() {
+            return Ok(result);
+        }
+
+        // Batch fetch profiles
+        let fids: Vec<i64> = sorted_mentions.iter().map(|(fid, _)| *fid).collect();
+        let mut profiles_map = std::collections::HashMap::new();
+
+        // Use a single query with IN clause (more efficient than multiple queries)
+        // Build dynamic SQL with placeholders for each FID
+        let placeholders: Vec<String> = (1..=fids.len()).map(|i| format!("${}", i)).collect();
+        let sql = format!(
+            r"
+            SELECT 
+                id, fid, username, display_name, bio, pfp_url, banner_url, location,
+                website_url, twitter_username, github_username, primary_address_ethereum,
+                primary_address_solana, profile_token, profile_embedding, bio_embedding,
+                interests_embedding, last_updated_timestamp, last_updated_at,
+                shard_id, block_height, transaction_fid
+            FROM user_profiles 
+            WHERE fid IN ({})
+            ",
+            placeholders.join(", ")
+        );
+
+        let mut query = sqlx::query_as::<_, crate::models::UserProfile>(&sql);
+        for fid in &fids {
+            query = query.bind(fid);
+        }
+        let profiles = query.fetch_all(self.database.pool()).await?;
+
+        for profile in profiles {
+            profiles_map.insert(profile.fid, profile);
+        }
+
+        // Build result with categories (simplified - skip categorize_user for performance)
         for (mentioned_fid, count) in sorted_mentions {
-            let profile = self.database.get_user_profile(mentioned_fid).await?;
+            let profile = profiles_map.get(&mentioned_fid);
 
             result.push(UserMention {
                 fid: mentioned_fid,
-                username: profile.as_ref().and_then(|p| p.username.clone()),
-                display_name: profile.as_ref().and_then(|p| p.display_name.clone()),
+                username: profile.and_then(|p| p.username.clone()),
+                display_name: profile.and_then(|p| p.display_name.clone()),
                 count,
-                category: self.categorize_user(mentioned_fid).await?,
+                category: "unknown".to_string(), // Skip expensive categorize_user call
             });
         }
 
         Ok(result)
     }
 
-    /// Get top users with profiles
+    /// Get top users with profiles (optimized with batch query)
     async fn get_top_users(&self, fids: &[i64], limit: usize) -> Result<Vec<UserMention>> {
+        if fids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let fids_to_fetch: Vec<i64> = fids.iter().take(limit).copied().collect();
+
+        // Batch fetch profiles in a single query
+        let placeholders: Vec<String> = (1..=fids_to_fetch.len())
+            .map(|i| format!("${}", i))
+            .collect();
+        let sql = format!(
+            r"
+            SELECT 
+                id, fid, username, display_name, bio, pfp_url, banner_url, location,
+                website_url, twitter_username, github_username, primary_address_ethereum,
+                primary_address_solana, profile_token, profile_embedding, bio_embedding,
+                interests_embedding, last_updated_timestamp, last_updated_at,
+                shard_id, block_height, transaction_fid
+            FROM user_profiles 
+            WHERE fid IN ({})
+            ",
+            placeholders.join(", ")
+        );
+
+        let mut query = sqlx::query_as::<_, crate::models::UserProfile>(&sql);
+        for fid in &fids_to_fetch {
+            query = query.bind(fid);
+        }
+        let profiles = query.fetch_all(self.database.pool()).await?;
+
+        // Build result map for quick lookup
+        let mut profiles_map = std::collections::HashMap::new();
+        for profile in profiles {
+            profiles_map.insert(profile.fid, profile);
+        }
+
+        // Build result in original order, skip expensive categorize_user
         let mut result = Vec::new();
-
-        for fid in fids.iter().take(limit) {
-            let profile = self.database.get_user_profile(*fid).await?;
-
+        for fid in fids_to_fetch {
+            let profile = profiles_map.get(&fid);
             result.push(UserMention {
-                fid: *fid,
-                username: profile.as_ref().and_then(|p| p.username.clone()),
-                display_name: profile.as_ref().and_then(|p| p.display_name.clone()),
+                fid,
+                username: profile.and_then(|p| p.username.clone()),
+                display_name: profile.and_then(|p| p.display_name.clone()),
                 count: 1,
-                category: self.categorize_user(*fid).await?,
+                category: "unknown".to_string(), // Skip expensive categorize_user call
             });
         }
 
@@ -865,21 +969,69 @@ impl SocialGraphAnalyzer {
             });
         }
 
+        // Simplified categorization - use profile data instead of expensive categorize_user
+        // Sample up to 50 users to avoid too many queries
+        let sample_size = following.len().min(50);
+        let fids_to_check: Vec<i64> = following.iter().take(sample_size).copied().collect();
+
+        // Batch fetch profiles
+        let placeholders: Vec<String> = (1..=fids_to_check.len())
+            .map(|i| format!("${}", i))
+            .collect();
+        let sql = format!(
+            r"
+            SELECT 
+                id, fid, username, display_name, bio, pfp_url, banner_url, location,
+                website_url, twitter_username, github_username, primary_address_ethereum,
+                primary_address_solana, profile_token, profile_embedding, bio_embedding,
+                interests_embedding, last_updated_timestamp, last_updated_at,
+                shard_id, block_height, transaction_fid
+            FROM user_profiles 
+            WHERE fid IN ({})
+            ",
+            placeholders.join(", ")
+        );
+
+        let mut query = sqlx::query_as::<_, crate::models::UserProfile>(&sql);
+        for fid in &fids_to_check {
+            query = query.bind(fid);
+        }
+        let profiles = query.fetch_all(self.database.pool()).await?;
+
         let mut tech_count = 0;
         let mut web3_count = 0;
         let mut creator_count = 0;
         let mut casual_count = 0;
 
-        // Sample up to 50 users to avoid too many queries
-        let sample_size = following.len().min(50);
+        // Simple categorization based on profile fields (much faster than analyze casts)
+        for profile in profiles {
+            let bio_lower = profile.bio.as_deref().unwrap_or("").to_lowercase();
+            let username_lower = profile.username.as_deref().unwrap_or("").to_lowercase();
+            let combined = format!("{} {}", bio_lower, username_lower);
 
-        for fid in following.iter().take(sample_size) {
-            let category = self.categorize_user(*fid).await?;
-            match category.as_str() {
-                "tech" => tech_count += 1,
-                "web3" => web3_count += 1,
-                "creator" => creator_count += 1,
-                _ => casual_count += 1,
+            // Quick keyword check
+            let has_tech = combined.contains("dev")
+                || combined.contains("build")
+                || combined.contains("code")
+                || combined.contains("github");
+            let has_web3 = combined.contains("web3")
+                || combined.contains("crypto")
+                || combined.contains("nft")
+                || combined.contains("eth")
+                || combined.contains("blockchain");
+            let has_creator = combined.contains("art")
+                || combined.contains("design")
+                || combined.contains("music")
+                || combined.contains("writer");
+
+            if has_tech && !has_web3 {
+                tech_count += 1;
+            } else if has_web3 {
+                web3_count += 1;
+            } else if has_creator {
+                creator_count += 1;
+            } else {
+                casual_count += 1;
             }
         }
 
