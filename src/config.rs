@@ -566,8 +566,8 @@ impl Default for AppConfig {
                 enable_stats: true,
             },
             x402: X402Config::default(),
-            redis: None,
-            cache_server: CacheServerConfig::default(),
+            redis: None, // Redis is optional but recommended for cache and job queue
+            cache_server: CacheServerConfig::default(), // Deprecated, kept for backward compatibility
             mbti: MbtiConfig::default(),
         }
     }

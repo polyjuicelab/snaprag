@@ -32,14 +32,14 @@ pub fn init_logging_with_config(config: Option<&crate::config::AppConfig>) -> Re
         let level = &config.logging.level;
         // 🚀 Always suppress sqlx SQL queries and third-party library noise
         // sqlx=error to disable slow query logging
+        // Allow INFO level for access logs
         EnvFilter::new(format!(
             "warn,snaprag={level},sqlx=error,h2=warn,tonic=warn,hyper=warn,tower=warn"
         ))
     } else {
-        // Fallback to environment variable or default to warn level for CLI
-        // Only show warnings and errors to keep CLI output clean
+        // Fallback to environment variable or default to info level to show access logs
         EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("warn,snaprag=warn,sqlx=error"))
+            .unwrap_or_else(|_| EnvFilter::new("warn,snaprag=info,sqlx=error"))
     };
 
     // Set up file appender for all logs
@@ -47,7 +47,7 @@ pub fn init_logging_with_config(config: Option<&crate::config::AppConfig>) -> Re
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     // Set up console appender - split stdout (info/debug/warn) and stderr (error)
-    // stdout layer: info, debug, warn levels
+    // stdout layer: info, debug, warn levels (INFO for access logs)
     let stdout_layer = fmt::layer()
         .with_target(false) // Don't show target for cleaner console output
         .with_thread_ids(false)
@@ -56,7 +56,7 @@ pub fn init_logging_with_config(config: Option<&crate::config::AppConfig>) -> Re
         .with_line_number(false)
         .with_span_events(FmtSpan::NONE)
         .with_writer(std::io::stdout)
-        .with_filter(tracing_subscriber::filter::LevelFilter::INFO); // Only info and above
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO); // INFO level to show access logs
 
     // stderr layer: only errors
     let stderr_layer = fmt::layer()
@@ -118,7 +118,8 @@ pub fn init_logging_with_level(level: &str) -> Result<()> {
     // Set up environment filter with custom level
     // Even in debug mode, keep third-party libraries at warn level to reduce noise
     let env_filter = if level == "debug" || level == "trace" {
-        // 🚀 In debug/trace mode, still suppress SQL queries unless explicitly needed
+        // 🚀 In debug/trace mode, show all snaprag logs including access logs
+        // Still suppress SQL queries unless explicitly needed
         EnvFilter::new(format!(
             "warn,snaprag={level},sqlx=error,h2=warn,tonic=warn,hyper=warn,tower=warn"
         ))
@@ -134,16 +135,16 @@ pub fn init_logging_with_level(level: &str) -> Result<()> {
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     // Set up console appenders - split stdout and stderr
-    // stdout layer: info, debug, warn levels
+    // stdout layer: info, debug, warn levels (INFO level for access logs)
     let stdout_layer = fmt::layer()
-        .with_target(true) // Show target in debug mode
+        .with_target(false) // Don't show target for cleaner output
         .with_thread_ids(false)
         .with_thread_names(false)
         .with_file(false)
         .with_line_number(false)
         .with_span_events(FmtSpan::NONE)
         .with_writer(std::io::stdout)
-        .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO); // INFO level to show access logs
 
     // stderr layer: only errors
     let stderr_layer = fmt::layer()

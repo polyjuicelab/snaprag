@@ -25,19 +25,63 @@ pub async fn get_mbti_analysis(
     info!("GET /api/mbti/{}", fid);
 
     // Check cache first
-    if let Some(cached_mbti) = state.cache_service.get_mbti(fid).await {
-        let duration = start_time.elapsed();
-        info!(
-            "📦 MBTI cache hit for FID {} - {}ms",
-            fid,
-            duration.as_millis()
-        );
-        let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
-            serde_json::json!({
-                "error": "Failed to serialize cached MBTI profile"
-            })
-        });
-        return Ok(Json(ApiResponse::success(mbti_data)));
+    match state.cache_service.get_mbti(fid).await {
+        Ok(crate::api::cache::CacheResult::Fresh(cached_mbti)) => {
+            let duration = start_time.elapsed();
+            info!(
+                "📦 MBTI cache hit (fresh) for FID {} - {}ms",
+                fid,
+                duration.as_millis()
+            );
+            let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached MBTI profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(mbti_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Stale(cached_mbti)) => {
+            // Stale cache - return stale data (MBTI doesn't need background update as it's less critical)
+            let duration = start_time.elapsed();
+            info!(
+                "📦 MBTI cache hit (stale) for FID {} - {}ms",
+                fid,
+                duration.as_millis()
+            );
+            let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached MBTI profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(mbti_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Updating(cached_mbti)) => {
+            // Cache expired - return updating status with old data
+            let duration = start_time.elapsed();
+            info!(
+                "🔄 MBTI cache expired (updating) for FID {} - {}ms",
+                fid,
+                duration.as_millis()
+            );
+            let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached MBTI profile"
+                })
+            });
+            // Return with updating status
+            return Ok(Json(ApiResponse::success(serde_json::json!({
+                "status": "updating",
+                "data": mbti_data,
+                "message": "MBTI data is being updated in the background. Please refresh to get the latest data."
+            }))));
+        }
+        Ok(crate::api::cache::CacheResult::Miss) => {
+            // Cache miss - continue to process
+        }
+        Err(e) => {
+            error!("Cache error for FID {}: {}", fid, e);
+            // Continue to process
+        }
     }
 
     // Get user profile first (for validation)
@@ -73,7 +117,13 @@ pub async fn get_mbti_analysis(
 
     // Try to get social profile from cache (if needed by method)
     let social_profile = if matches!(method, MbtiMethod::RuleBased | MbtiMethod::Ensemble) {
-        state.cache_service.get_social(fid).await
+        match state.cache_service.get_social(fid).await {
+            Ok(
+                crate::api::cache::CacheResult::Fresh(s) | crate::api::cache::CacheResult::Stale(s),
+            ) => Some(s),
+            Ok(crate::api::cache::CacheResult::Updating(s)) => Some(s), // Use old data even if updating
+            Ok(crate::api::cache::CacheResult::Miss) | Err(_) => None,
+        }
     } else {
         None
     };
@@ -126,10 +176,9 @@ pub async fn get_mbti_analysis(
     match analysis_result {
         Ok(mbti_profile) => {
             // Cache the MBTI analysis
-            state
-                .cache_service
-                .set_mbti(fid, mbti_profile.clone())
-                .await;
+            if let Err(e) = state.cache_service.set_mbti(fid, &mbti_profile).await {
+                error!("Failed to cache MBTI profile: {}", e);
+            }
 
             // Convert to JSON
             let mbti_data = serde_json::to_value(&mbti_profile).unwrap_or_else(|_| {
@@ -190,17 +239,51 @@ pub async fn get_mbti_analysis_by_username(
     };
 
     // Check cache first for the FID
-    if let Some(cached_mbti) = state.cache_service.get_mbti(profile.fid).await {
-        info!(
-            "📦 MBTI cache hit for username {} (FID {})",
-            username, profile.fid
-        );
-        let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
-            serde_json::json!({
-                "error": "Failed to serialize cached MBTI profile"
-            })
-        });
-        return Ok(Json(ApiResponse::success(mbti_data)));
+    match state.cache_service.get_mbti(profile.fid).await {
+        Ok(crate::api::cache::CacheResult::Fresh(cached_mbti)) => {
+            info!(
+                "📦 MBTI cache hit (fresh) for username {} (FID {})",
+                username, profile.fid
+            );
+            let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached MBTI profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(mbti_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Stale(cached_mbti)) => {
+            info!(
+                "📦 MBTI cache hit (stale) for username {} (FID {})",
+                username, profile.fid
+            );
+            let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached MBTI profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(mbti_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Updating(cached_mbti)) => {
+            info!(
+                "🔄 MBTI cache expired (updating) for username {} (FID {})",
+                username, profile.fid
+            );
+            let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached MBTI profile"
+                })
+            });
+            // Return with updating status
+            return Ok(Json(ApiResponse::success(serde_json::json!({
+                "status": "updating",
+                "data": mbti_data,
+                "message": "MBTI data is being updated in the background. Please refresh to get the latest data."
+            }))));
+        }
+        Ok(crate::api::cache::CacheResult::Miss) | Err(_) => {
+            // Cache miss or error - continue to process
+        }
     }
 
     // Get analysis method from config
@@ -208,7 +291,13 @@ pub async fn get_mbti_analysis_by_username(
 
     // Try to get social profile from cache (if needed by method)
     let social_profile = if matches!(method, MbtiMethod::RuleBased | MbtiMethod::Ensemble) {
-        state.cache_service.get_social(profile.fid).await
+        match state.cache_service.get_social(profile.fid).await {
+            Ok(
+                crate::api::cache::CacheResult::Fresh(s) | crate::api::cache::CacheResult::Stale(s),
+            ) => Some(s),
+            Ok(crate::api::cache::CacheResult::Updating(s)) => Some(s), // Use old data even if updating
+            Ok(crate::api::cache::CacheResult::Miss) | Err(_) => None,
+        }
     } else {
         None
     };
@@ -262,10 +351,13 @@ pub async fn get_mbti_analysis_by_username(
     match analysis_result {
         Ok(mbti_profile) => {
             // Cache the result
-            state
+            if let Err(e) = state
                 .cache_service
-                .set_mbti(profile.fid, mbti_profile.clone())
-                .await;
+                .set_mbti(profile.fid, &mbti_profile)
+                .await
+            {
+                error!("Failed to cache MBTI profile: {}", e);
+            }
 
             let mbti_data = serde_json::to_value(&mbti_profile).unwrap_or_else(|_| {
                 serde_json::json!({
@@ -303,18 +395,42 @@ pub async fn batch_mbti_analysis(
 
     for fid in req.fids {
         // Check cache first
-        if let Some(cached_mbti) = state.cache_service.get_mbti(fid).await {
-            results.push(MbtiResult {
-                fid,
-                mbti_profile: Some(cached_mbti),
-                error: None,
-            });
-            continue;
+        match state.cache_service.get_mbti(fid).await {
+            Ok(
+                crate::api::cache::CacheResult::Fresh(cached_mbti)
+                | crate::api::cache::CacheResult::Stale(cached_mbti),
+            ) => {
+                results.push(MbtiResult {
+                    fid,
+                    mbti_profile: Some(cached_mbti),
+                    error: None,
+                });
+                continue;
+            }
+            Ok(crate::api::cache::CacheResult::Updating(cached_mbti)) => {
+                // Return old data with updating status in batch results
+                results.push(MbtiResult {
+                    fid,
+                    mbti_profile: Some(cached_mbti),
+                    error: Some("Data is being updated in the background".to_string()),
+                });
+                continue;
+            }
+            Ok(crate::api::cache::CacheResult::Miss) | Err(_) => {
+                // Cache miss or error - continue to process
+            }
         }
 
         // Get social profile if needed by method
         let social_profile = if matches!(method, MbtiMethod::RuleBased | MbtiMethod::Ensemble) {
-            state.cache_service.get_social(fid).await
+            match state.cache_service.get_social(fid).await {
+                Ok(
+                    crate::api::cache::CacheResult::Fresh(s)
+                    | crate::api::cache::CacheResult::Stale(s),
+                ) => Some(s),
+                Ok(crate::api::cache::CacheResult::Updating(s)) => Some(s), // Use old data even if updating
+                Ok(crate::api::cache::CacheResult::Miss) | Err(_) => None,
+            }
         } else {
             None
         };
@@ -366,10 +482,9 @@ pub async fn batch_mbti_analysis(
         match analysis_result {
             Ok(mbti_profile) => {
                 // Cache result
-                state
-                    .cache_service
-                    .set_mbti(fid, mbti_profile.clone())
-                    .await;
+                if let Err(e) = state.cache_service.set_mbti(fid, &mbti_profile).await {
+                    error!("Failed to cache MBTI profile: {}", e);
+                }
 
                 results.push(MbtiResult {
                     fid,
@@ -573,7 +688,13 @@ async fn get_mbti_profile(
     method: MbtiMethod,
 ) -> Result<crate::personality::MbtiProfile, crate::SnapRagError> {
     let social_profile = if matches!(method, MbtiMethod::RuleBased | MbtiMethod::Ensemble) {
-        state.cache_service.get_social(fid).await
+        match state.cache_service.get_social(fid).await {
+            Ok(
+                crate::api::cache::CacheResult::Fresh(s) | crate::api::cache::CacheResult::Stale(s),
+            ) => Some(s),
+            Ok(crate::api::cache::CacheResult::Updating(s)) => Some(s), // Use old data even if updating
+            Ok(crate::api::cache::CacheResult::Miss) | Err(_) => None,
+        }
     } else {
         None
     };

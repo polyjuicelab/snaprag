@@ -8,6 +8,7 @@ pub mod integration_sync_test;
 pub mod message_types_test;
 pub mod rag_integration_test;
 pub mod real_data_test;
+pub mod redis_cache_test;
 pub mod strict_test_config;
 pub mod strict_test_runner;
 pub mod strict_test_validation;

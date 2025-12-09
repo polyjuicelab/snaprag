@@ -57,16 +57,26 @@ llm_key = "ollama"
 llm_model = "gemma3:27b"
 
 [cache]
-# API caching configuration
+# API caching configuration (uses Redis)
 enabled = true
 # Profile cache TTL in seconds (default: 1 hour)
 profile_ttl_secs = 3600
 # Social analysis cache TTL in seconds (default: 1 hour)  
 social_ttl_secs = 3600
-# Maximum number of cache entries
-max_entries = 10000
 # Enable cache statistics
 enable_stats = true
+
+[redis]
+# Redis configuration (required for cache and job queue)
+url = "redis://127.0.0.1:6379"
+# Namespace/prefix for keys (e.g. "snaprag:")
+namespace = "snaprag:"
+# Default TTL for cached API payloads (seconds). Target: 30 days
+default_ttl_secs = 2592000
+# Stale threshold for async refresh trigger (seconds). Target: 5 minutes
+stale_threshold_secs = 300
+# PubSub channel for refresh notifications
+refresh_channel = "snaprag.refresh"
 
 [x402]
 # x402 payment configuration (optional, for paid API access)

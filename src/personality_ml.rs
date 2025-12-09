@@ -590,3 +590,5 @@ fn get_traits_for_type(mbti_type: &str) -> Vec<String> {
 
 
 
+
+
