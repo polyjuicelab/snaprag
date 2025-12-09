@@ -592,7 +592,7 @@ pub enum CastEmbeddingAction {
 
 #[derive(Subcommand)]
 pub enum ServeCommands {
-    /// Start API server (`RESTful` + MCP)
+    /// Start RESTful API server
     Api {
         /// Host to bind to
         #[arg(long, default_value = "127.0.0.1")]
@@ -615,6 +615,39 @@ pub enum ServeCommands {
         #[cfg(feature = "payment")]
         #[arg(long)]
         testnet: Option<bool>,
+    },
+    /// Start MCP (Model Context Protocol) server
+    Mcp {
+        /// Host to bind to
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port to bind to
+        #[arg(short, long, default_value = "3001")]
+        port: u16,
+        /// Enable CORS
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        cors: bool,
+        /// Enable x402 payment
+        #[cfg(feature = "payment")]
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        payment: bool,
+        /// Address to receive payments (defaults to config or 0x0)
+        #[cfg(feature = "payment")]
+        #[arg(long)]
+        payment_address: Option<String>,
+        /// Use testnet (base-sepolia) or mainnet (base). If not specified, uses config default.
+        #[cfg(feature = "payment")]
+        #[arg(long)]
+        testnet: Option<bool>,
+    },
+    /// Start background worker for processing jobs
+    Worker {
+        /// Queue name to process (default: "social")
+        #[arg(long, default_value = "social")]
+        queue: String,
+        /// Number of concurrent workers
+        #[arg(long, default_value = "1")]
+        workers: usize,
     },
 }
 
