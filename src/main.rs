@@ -449,6 +449,34 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
+            ServeCommands::Mcp {
+                host,
+                port,
+                cors,
+                #[cfg(feature = "payment")]
+                payment,
+                #[cfg(feature = "payment")]
+                payment_address,
+                #[cfg(feature = "payment")]
+                testnet,
+            } => {
+                snaprag::cli::handle_serve_mcp(
+                    &config,
+                    host,
+                    port,
+                    cors,
+                    #[cfg(feature = "payment")]
+                    payment,
+                    #[cfg(feature = "payment")]
+                    payment_address,
+                    #[cfg(feature = "payment")]
+                    testnet,
+                )
+                .await?;
+            }
+            ServeCommands::Worker { queue, workers } => {
+                snaprag::cli::handle_serve_worker(&config, queue, workers).await?;
+            }
         },
     }
 

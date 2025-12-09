@@ -136,16 +136,42 @@ impl Database {
     }
 
     /// Get user profile by username
+    ///
+    /// Optimized to use index on user_profile_changes for fast username lookups.
+    /// This avoids scanning the entire view by directly querying the underlying table.
+    ///
+    /// The index idx_profile_changes_username_value on (field_value, fid, timestamp DESC)
+    /// WHERE field_name = 'username' allows efficient lookups. Since the index is ordered
+    /// by field_value, fid, timestamp DESC, we can directly get the first matching record.
     pub async fn get_user_profile_by_username(
         &self,
         username: &str,
     ) -> Result<Option<UserProfile>> {
-        let profile = sqlx::query_as("SELECT * FROM user_profiles WHERE username = $1")
-            .bind(username)
-            .fetch_optional(&self.pool)
-            .await?;
+        // Find the FID by username using the optimized index
+        // The index is on (field_value, fid, timestamp DESC), so for a given username,
+        // we get records ordered by fid, then timestamp DESC. We use DISTINCT ON (fid)
+        // to get the latest record for each fid, then take the first one.
+        let fid_result: Option<(i64,)> = sqlx::query_as(
+            r"
+            SELECT DISTINCT ON (fid) fid
+            FROM user_profile_changes
+            WHERE field_name = 'username' AND field_value = $1
+            ORDER BY fid, timestamp DESC
+            LIMIT 1
+            ",
+        )
+        .bind(username)
+        .fetch_optional(&self.pool)
+        .await?;
 
-        Ok(profile)
+        // If no FID found, return None
+        let fid = match fid_result {
+            Some((fid,)) => fid,
+            None => return Ok(None),
+        };
+
+        // Then get the full profile by FID (this is fast with existing index)
+        self.get_user_profile(fid).await
     }
 
     /// Update user profile field and create snapshot

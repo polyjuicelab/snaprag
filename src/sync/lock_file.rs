@@ -213,6 +213,7 @@ impl SyncLockManager {
     }
 
     /// Get age of lock file in seconds
+    #[allow(clippy::unused_self)]
     fn get_lock_age_seconds(&self, lock: &SyncLockFile) -> u64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -238,6 +239,7 @@ impl SyncLockManager {
             if self.is_process_running(lock.pid) {
                 warn!("Force killing stale process PID: {}", lock.pid);
                 unsafe {
+                    #[allow(clippy::cast_possible_wrap)]
                     libc::kill(lock.pid as i32, libc::SIGKILL);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(500));
@@ -336,9 +338,13 @@ impl SyncLockManager {
     }
 
     /// Check if a process is running
+    #[allow(clippy::unused_self)]
     fn is_process_running(&self, pid: u32) -> bool {
         // On Unix systems, kill with signal 0 checks if process exists
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        #[allow(clippy::cast_possible_wrap)]
+        unsafe {
+            libc::kill(pid as i32, 0) == 0
+        }
     }
 
     /// Get lock file path
