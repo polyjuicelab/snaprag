@@ -81,6 +81,8 @@ async fn handle_index_unset(snaprag: &SnapRag, force: bool) -> Result<()> {
         // User profiles
         "idx_user_profiles_username",
         "idx_user_profiles_display_name",
+        // User profile changes - optimized username lookup index
+        "idx_profile_changes_username_value",
         // User profile changes - pg_trgm indexes
         "idx_user_profile_changes_value_trgm",
         // User profile snapshots
@@ -214,6 +216,8 @@ async fn handle_index_set(snaprag: &SnapRag, force: bool) -> Result<()> {
         // User profiles
         ("idx_user_profiles_username", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_profiles_username ON user_profiles(username)"),
         ("idx_user_profiles_display_name", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_profiles_display_name ON user_profiles(display_name)"),
+        // User profile changes - optimized username lookup index
+        ("idx_profile_changes_username_value", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profile_changes_username_value ON user_profile_changes(field_value, fid, timestamp DESC) WHERE field_name = 'username'"),
         // User profile changes - pg_trgm indexes
         ("idx_user_profile_changes_value_trgm", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_profile_changes_value_trgm ON user_profile_changes USING gin(field_value gin_trgm_ops) WHERE field_value IS NOT NULL AND length(field_value) > 0"),
         // User profile snapshots
@@ -363,6 +367,8 @@ async fn handle_index_status(snaprag: &SnapRag) -> Result<()> {
         // User profiles
         "idx_user_profiles_username",
         "idx_user_profiles_display_name",
+        // User profile changes - optimized username lookup index
+        "idx_profile_changes_username_value",
         // User profile changes - pg_trgm indexes
         "idx_user_profile_changes_value_trgm",
         // User profile snapshots

@@ -310,6 +310,7 @@ impl SnapRag {
 
         // If lazy loader is available, try lazy loading
         if let Some(loader) = &self.lazy_loader {
+            #[allow(clippy::cast_sign_loss)]
             match loader.fetch_user_profile(fid as u64).await {
                 Ok(profile) => Ok(Some(profile)),
                 Err(e) => {
@@ -336,6 +337,7 @@ impl SnapRag {
 
         // If lazy loader is available, try lazy loading
         if let Some(loader) = &self.lazy_loader {
+            #[allow(clippy::cast_sign_loss)]
             match loader.fetch_user_casts(fid as u64).await {
                 Ok(casts) => {
                     // Return limited results if requested
@@ -399,9 +401,14 @@ impl SnapRag {
     /// - gRPC client creation failures
     /// - Sync service initialization failures
     pub async fn start_sync_with_range(&mut self, from_block: u64, to_block: u64) -> Result<()> {
-        let sync_service = Arc::new(SyncService::new(&self.config, self.database.clone()).await?);
-        sync_service.start_with_range(from_block, to_block).await?;
-        self.sync_service = Some(sync_service);
+        self.sync_service = Some(Arc::new(
+            SyncService::new(&self.config, self.database.clone()).await?,
+        ));
+        self.sync_service
+            .as_ref()
+            .unwrap()
+            .start_with_range(from_block, to_block)
+            .await?;
         Ok(())
     }
 
@@ -419,11 +426,14 @@ impl SnapRag {
         to_block: u64,
         workers_per_shard: u32,
     ) -> Result<()> {
-        let sync_service = Arc::new(SyncService::new(&self.config, self.database.clone()).await?);
-        sync_service
+        self.sync_service = Some(Arc::new(
+            SyncService::new(&self.config, self.database.clone()).await?,
+        ));
+        self.sync_service
+            .as_ref()
+            .unwrap()
             .start_with_range_and_workers(from_block, to_block, workers_per_shard)
             .await?;
-        self.sync_service = Some(sync_service);
         Ok(())
     }
 

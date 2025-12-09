@@ -41,7 +41,6 @@ pub async fn get_stats(
 
     // Get cache statistics
     let cache_stats = state.cache_service.get_stats().await;
-    let cache_info = state.cache_service.get_cache_info().await;
 
     Ok(Json(ApiResponse::success(StatsResponse {
         total_profiles,
@@ -52,14 +51,14 @@ pub async fn get_stats(
             hits: cache_stats.hits,
             misses: cache_stats.misses,
             hit_rate: cache_stats.hit_rate(),
-            evictions: cache_stats.evictions,
-            expired_cleanups: cache_stats.expired_cleanups,
-            profile_entries: cache_info.profile_entries,
-            social_entries: cache_info.social_entries,
-            mbti_entries: cache_info.mbti_entries,
-            total_entries: cache_info.total_entries,
-            max_entries: cache_info.max_entries,
-            usage_percentage: cache_info.usage_percentage(),
+            evictions: 0, // Redis doesn't track evictions the same way
+            expired_cleanups: cache_stats.stale_hits, // Use stale_hits as a proxy
+            profile_entries: 0, // Redis doesn't provide entry counts easily
+            social_entries: 0,
+            mbti_entries: 0,
+            total_entries: 0,
+            max_entries: 0, // Redis doesn't have a fixed max
+            usage_percentage: 0.0,
         }),
     })))
 }

@@ -231,26 +231,125 @@ pub async fn get_social_analysis(
     let start_time = std::time::Instant::now();
     info!("GET /api/social/{}", fid);
 
+    let job_key = format!("social:{}", fid);
+
     // Check cache first
     tracing::debug!("Checking cache for social analysis FID {}", fid);
-    if let Some(cached_social) = state.cache_service.get_social(fid).await {
-        let duration = start_time.elapsed();
-        info!(
-            "📦 Social cache hit for FID {} - {}ms",
-            fid,
-            duration.as_millis()
-        );
-        let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
-            serde_json::json!({
-                "error": "Failed to serialize cached social profile"
-            })
-        });
-        return Ok(Json(ApiResponse::success(social_data)));
+    match state.cache_service.get_social(fid).await {
+        Ok(crate::api::cache::CacheResult::Fresh(cached_social)) => {
+            let duration = start_time.elapsed();
+            info!(
+                "📦 Social cache hit (fresh) for FID {} - {}ms",
+                fid,
+                duration.as_millis()
+            );
+            let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached social profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(social_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Stale(cached_social)) => {
+            // Stale cache - return stale data and trigger background update
+            info!(
+                "📦 Social cache hit (stale) for FID {}, triggering background update",
+                fid
+            );
+
+            // Trigger background update if Redis is available
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
+                    {
+                        info!("🔄 Triggered background update for FID {}", fid);
+                    }
+                }
+            }
+
+            let duration = start_time.elapsed();
+            let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached social profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(social_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Updating(cached_social)) => {
+            // Cache expired - return updating status with old data
+            info!(
+                "🔄 Social cache expired (updating) for FID {}, returning old data with updating status",
+                fid
+            );
+
+            // Trigger background update if Redis is available
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
+                    {
+                        info!("🔄 Triggered background update for FID {}", fid);
+                    }
+                }
+            }
+
+            let duration = start_time.elapsed();
+            let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached social profile"
+                })
+            });
+            // Return with updating status
+            return Ok(Json(ApiResponse::success(serde_json::json!({
+                "status": "updating",
+                "data": social_data,
+                "message": "Data is being updated in the background. Please refresh to get the latest data."
+            }))));
+        }
+        Ok(crate::api::cache::CacheResult::Miss) => {
+            tracing::debug!(
+                "No cache hit for social analysis FID {}, checking job status",
+                fid
+            );
+        }
+        Err(e) => {
+            error!("Cache error for FID {}: {}", fid, e);
+            // Continue to process synchronously
+        }
     }
-    tracing::debug!(
-        "No cache hit for social analysis FID {}, proceeding to analysis",
-        fid
-    );
+
+    // Cache miss - check if job is already processing
+    if let Some(redis_cfg) = &state.config.redis {
+        if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg) {
+            // Check if job is already active
+            if redis_client.is_job_active(&job_key).await.unwrap_or(false) {
+                // Job already in queue or processing
+                info!("⏳ Job already processing for FID {}", fid);
+                return Ok(Json(ApiResponse::success(serde_json::json!({
+                    "status": "pending",
+                    "job_key": job_key,
+                    "message": "Analysis in progress, please check back later"
+                }))));
+            }
+
+            // Create new job
+            let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
+            if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await {
+                info!("📤 Created background job for FID {}", fid);
+                return Ok(Json(ApiResponse::success(serde_json::json!({
+                    "status": "pending",
+                    "job_key": job_key,
+                    "message": "Analysis started, please check back later"
+                }))));
+            }
+        }
+    }
+
+    // Fallback: process synchronously if Redis is not available
+    error!("Redis not available, falling back to synchronous processing");
 
     // Get user profile first
     let profile = match state.database.get_user_profile(fid).await {
@@ -288,10 +387,9 @@ pub async fn get_social_analysis(
         Ok(social_profile) => {
             // Cache the social analysis
             tracing::debug!("Caching social analysis response for FID {}", fid);
-            state
-                .cache_service
-                .set_social(fid, social_profile.clone())
-                .await;
+            if let Err(e) = state.cache_service.set_social(fid, &social_profile).await {
+                error!("Failed to cache social profile: {}", e);
+            }
 
             // Convert social profile to JSON
             let social_data = serde_json::to_value(&social_profile).unwrap_or_else(|_| {
@@ -302,7 +400,7 @@ pub async fn get_social_analysis(
 
             let duration = start_time.elapsed();
             info!(
-                "✅ GET /api/social/{} - {}ms - 200 (cached)",
+                "✅ GET /api/social/{} - {}ms - 200",
                 fid,
                 duration.as_millis()
             );
@@ -349,31 +447,123 @@ pub async fn get_social_analysis_by_username(
         }
     };
 
+    let fid = profile.fid;
+    let job_key = format!("social:{}", fid);
+
     // Check cache first for the FID
-    if let Some(cached_social) = state.cache_service.get_social(profile.fid).await {
-        info!(
-            "📦 Social cache hit for username {} (FID {})",
-            username, profile.fid
-        );
-        let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
-            serde_json::json!({
-                "error": "Failed to serialize cached social profile"
-            })
-        });
-        return Ok(Json(ApiResponse::success(social_data)));
+    match state.cache_service.get_social(fid).await {
+        Ok(crate::api::cache::CacheResult::Fresh(cached_social)) => {
+            info!(
+                "📦 Social cache hit (fresh) for username {} (FID {})",
+                username, fid
+            );
+            let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached social profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(social_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Stale(cached_social)) => {
+            // Stale cache - return stale data and trigger background update
+            info!("📦 Social cache hit (stale) for username {} (FID {}), triggering background update", username, fid);
+
+            // Trigger background update if Redis is available
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
+                    {
+                        info!("🔄 Triggered background update for FID {}", fid);
+                    }
+                }
+            }
+
+            let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached social profile"
+                })
+            });
+            return Ok(Json(ApiResponse::success(social_data)));
+        }
+        Ok(crate::api::cache::CacheResult::Updating(cached_social)) => {
+            // Cache expired - return updating status with old data
+            info!("🔄 Social cache expired (updating) for username {} (FID {}), returning old data with updating status", username, fid);
+
+            // Trigger background update if Redis is available
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
+                    {
+                        info!("🔄 Triggered background update for FID {}", fid);
+                    }
+                }
+            }
+
+            let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "error": "Failed to serialize cached social profile"
+                })
+            });
+            // Return with updating status
+            return Ok(Json(ApiResponse::success(serde_json::json!({
+                "status": "updating",
+                "data": social_data,
+                "message": "Data is being updated in the background. Please refresh to get the latest data."
+            }))));
+        }
+        Ok(crate::api::cache::CacheResult::Miss) => {
+            // Cache miss - check if job is already processing
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    // Check if job is already active
+                    if redis_client.is_job_active(&job_key).await.unwrap_or(false) {
+                        // Job already in queue or processing
+                        info!("⏳ Job already processing for FID {}", fid);
+                        return Ok(Json(ApiResponse::success(serde_json::json!({
+                            "status": "pending",
+                            "job_key": job_key,
+                            "message": "Analysis in progress, please check back later"
+                        }))));
+                    }
+
+                    // Create new job
+                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
+                    {
+                        info!("📤 Created background job for FID {}", fid);
+                        return Ok(Json(ApiResponse::success(serde_json::json!({
+                            "status": "pending",
+                            "job_key": job_key,
+                            "message": "Analysis started, please check back later"
+                        }))));
+                    }
+                }
+            }
+
+            // Fallback: process synchronously if Redis is not available
+            error!("Redis not available, falling back to synchronous processing");
+        }
+        Err(e) => {
+            error!("Cache error: {}", e);
+            // Continue to process synchronously
+        }
     }
 
     // Initialize social graph analyzer
     let analyzer = SocialGraphAnalyzer::new(state.database.clone());
 
     // Analyze user's social graph using the FID from the profile
-    match analyzer.analyze_user(profile.fid).await {
+    match analyzer.analyze_user(fid).await {
         Ok(social_profile) => {
             // Cache the social analysis
-            state
-                .cache_service
-                .set_social(profile.fid, social_profile.clone())
-                .await;
+            if let Err(e) = state.cache_service.set_social(fid, &social_profile).await {
+                error!("Failed to cache social profile: {}", e);
+            }
 
             // Convert social profile to JSON
             let social_data = serde_json::to_value(&social_profile).unwrap_or_else(|_| {
@@ -387,7 +577,7 @@ pub async fn get_social_analysis_by_username(
         Err(e) => {
             error!(
                 "Failed to analyze social graph for username {} (FID {}): {}",
-                username, profile.fid, e
+                username, fid, e
             );
             Ok(Json(ApiResponse::error(format!(
                 "Failed to analyze social graph: {e}"
