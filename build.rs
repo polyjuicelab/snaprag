@@ -174,6 +174,7 @@ fn compile_protobufs() {
             }
         }
     }
+
     // Ensure grpc_client module is declared in mod.rs (after protobuf-codegen may have regenerated it)
     add_grpc_client_to_mod_rs(out_dir, verbose);
 }

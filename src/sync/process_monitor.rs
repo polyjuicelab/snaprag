@@ -116,11 +116,16 @@ impl ProcessMonitor {
     }
 
     /// Check if process is running
+    #[allow(clippy::unused_self)]
     fn is_process_running(&self, pid: u32) -> bool {
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        #[allow(clippy::cast_possible_wrap)]
+        unsafe {
+            libc::kill(pid as i32, 0) == 0
+        }
     }
 
     /// Get process start time
+    #[allow(clippy::unused_self)]
     fn get_process_start_time(&self, pid: u32) -> Result<Duration> {
         use std::process::Command;
 
@@ -156,6 +161,7 @@ impl ProcessMonitor {
     }
 
     /// Check if process is idle based on last activity
+    #[allow(clippy::unused_self)]
     const fn is_process_idle(&self, _pid: u32) -> bool {
         // Process idle detection via last activity time
         // In a full implementation, could track per-process activity timestamps
@@ -170,6 +176,7 @@ impl ProcessMonitor {
     fn force_kill_process(&self, pid: u32) {
         // Try graceful shutdown first
         unsafe {
+            #[allow(clippy::cast_possible_wrap)]
             libc::kill(pid as i32, libc::SIGTERM);
         }
 
@@ -179,6 +186,7 @@ impl ProcessMonitor {
         // Force kill if still running
         if self.is_process_running(pid) {
             unsafe {
+                #[allow(clippy::cast_possible_wrap)]
                 libc::kill(pid as i32, libc::SIGKILL);
             }
         }

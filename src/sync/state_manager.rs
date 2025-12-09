@@ -158,6 +158,9 @@ impl SyncStateManager {
     }
 
     /// Add error message
+    ///
+    /// # Errors
+    /// Returns an error if saving the state fails
     pub fn add_error(&mut self, error: String) -> Result<()> {
         self.state.errors.push(error);
         // Keep only last 100 errors to prevent file from growing too large

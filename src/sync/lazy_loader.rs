@@ -448,6 +448,7 @@ impl LazyLoader {
             fid
         );
 
+        #[allow(clippy::cast_sign_loss)]
         match self.fetch_user_casts(fid as u64).await {
             Ok(mut casts) => {
                 // Apply limit if specified

@@ -101,8 +101,10 @@ impl RealtimeMonitor {
                         "Failed to check for new chunks in shard {}: {}",
                         shard_id, err
                     );
-                    let mut sm = self.state_manager.write().await;
-                    sm.add_error(format!("Shard {shard_id} real-time sync error: {err}"))?;
+                    self.state_manager
+                        .write()
+                        .await
+                        .add_error(format!("Shard {shard_id} real-time sync error: {err}"))?;
                 }
             }
 
