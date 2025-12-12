@@ -117,6 +117,28 @@ pub async fn get_profile(
     };
 
     if let Some(profile) = profile {
+        // Fetch additional statistics
+        let registered_at = state
+            .database
+            .get_registration_timestamp(profile.fid)
+            .await
+            .unwrap_or(None);
+        let total_casts = state
+            .database
+            .count_casts_by_fid(profile.fid)
+            .await
+            .unwrap_or(0);
+        let total_reactions = state
+            .database
+            .count_reactions_by_fid(profile.fid)
+            .await
+            .unwrap_or(0);
+        let total_links = state
+            .database
+            .count_links_by_fid(profile.fid)
+            .await
+            .unwrap_or(0);
+
         let response = ProfileResponse {
             fid: profile.fid,
             username: profile.username,
@@ -126,6 +148,10 @@ pub async fn get_profile(
             location: profile.location,
             twitter_username: profile.twitter_username,
             github_username: profile.github_username,
+            registered_at,
+            total_casts: Some(total_casts),
+            total_reactions: Some(total_reactions),
+            total_links: Some(total_links),
         };
 
         // Cache the response
@@ -188,6 +214,8 @@ pub async fn list_profiles(
 
     match state.database.list_user_profiles(query).await {
         Ok(profiles) => {
+            // For list endpoints, we can optionally include stats, but it might be slow
+            // For now, we'll skip stats for list endpoints to keep it fast
             let response: Vec<ProfileResponse> = profiles
                 .into_iter()
                 .map(|p| ProfileResponse {
@@ -199,6 +227,10 @@ pub async fn list_profiles(
                     location: p.location,
                     twitter_username: p.twitter_username,
                     github_username: p.github_username,
+                    registered_at: None,
+                    total_casts: None,
+                    total_reactions: None,
+                    total_links: None,
                 })
                 .collect();
             let response_data = serde_json::to_value(&response).unwrap_or_else(|_| {
@@ -222,7 +254,7 @@ pub async fn get_profile_by_username(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     info!("GET /api/profiles/username/{}", username);
 
-    // Try database first
+    // Get FID from username
     let profile = match state.database.get_user_profile_by_username(&username).await {
         Ok(Some(p)) => Some(p),
         Ok(None) => {
@@ -246,35 +278,82 @@ pub async fn get_profile_by_username(
         }
     };
 
-    match profile {
-        Some(profile) => {
-            let response = ProfileResponse {
-                fid: profile.fid,
-                username: profile.username,
-                display_name: profile.display_name,
-                bio: profile.bio,
-                pfp_url: profile.pfp_url,
-                location: profile.location,
-                twitter_username: profile.twitter_username,
-                github_username: profile.github_username,
-            };
-
-            // Cache the response by FID (since username lookups are less common)
-            if let Err(e) = state
-                .cache_service
-                .set_profile(profile.fid, &response)
-                .await
-            {
-                error!("Failed to cache profile: {}", e);
-            }
-
-            let response_data = serde_json::to_value(&response).unwrap_or_else(|_| {
-                serde_json::json!({
-                    "error": "Failed to serialize profile response"
-                })
-            });
-            Ok(Json(ApiResponse::success(response_data)))
-        }
-        None => Err(StatusCode::NOT_FOUND),
+    // If we found a profile, get the FID and call get_profile() which handles caching
+    if let Some(profile) = profile {
+        get_profile(State(state), Path(profile.fid)).await
+    } else {
+        Err(StatusCode::NOT_FOUND)
     }
+}
+
+/// Get profile by Ethereum address (with caching)
+pub async fn get_profile_by_ethereum_address(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    info!("GET /api/profiles/address/ethereum/{}", address);
+
+    // Get FID from Ethereum address
+    let fid = match state.database.get_fid_by_ethereum_address(&address).await {
+        Ok(Some(fid)) => fid,
+        Ok(None) => {
+            info!("No FID found for Ethereum address: {}", address);
+            return Err(StatusCode::NOT_FOUND);
+        }
+        Err(e) => {
+            error!("Error fetching FID by Ethereum address: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Use existing get_profile handler which handles caching
+    get_profile(State(state), Path(fid)).await
+}
+
+/// Get profile by Solana address (with caching)
+pub async fn get_profile_by_solana_address(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    info!("GET /api/profiles/address/solana/{}", address);
+
+    // Get FID from Solana address
+    let fid = match state.database.get_fid_by_solana_address(&address).await {
+        Ok(Some(fid)) => fid,
+        Ok(None) => {
+            info!("No FID found for Solana address: {}", address);
+            return Err(StatusCode::NOT_FOUND);
+        }
+        Err(e) => {
+            error!("Error fetching FID by Solana address: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Use existing get_profile handler which handles caching
+    get_profile(State(state), Path(fid)).await
+}
+
+/// Get profile by address (auto-detect Ethereum or Solana, with caching)
+pub async fn get_profile_by_address(
+    State(state): State<AppState>,
+    Path(address): Path<String>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
+    info!("GET /api/profiles/address/{}", address);
+
+    // Get FID from address (auto-detect format)
+    let fid = match state.database.get_fid_by_address(&address).await {
+        Ok(Some(fid)) => fid,
+        Ok(None) => {
+            info!("No FID found for address: {}", address);
+            return Err(StatusCode::NOT_FOUND);
+        }
+        Err(e) => {
+            error!("Error fetching FID by address: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Use existing get_profile handler which handles caching
+    get_profile(State(state), Path(fid)).await
 }

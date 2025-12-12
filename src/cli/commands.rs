@@ -193,6 +193,9 @@ pub enum Commands {
         #[arg(short, long)]
         export: Option<String>,
     },
+    /// Cache management commands
+    #[command(subcommand)]
+    Cache(CacheCommands),
 }
 
 #[derive(Subcommand)]
@@ -642,12 +645,24 @@ pub enum ServeCommands {
     },
     /// Start background worker for processing jobs
     Worker {
-        /// Queue name to process (default: "social")
-        #[arg(long, default_value = "social")]
+        /// Queue name(s) to process (comma-separated, e.g., "social,mbti" or default: "social,mbti")
+        #[arg(long, default_value = "social,mbti")]
         queue: String,
         /// Number of concurrent workers
         #[arg(long, default_value = "1")]
         workers: usize,
+        /// Clean up old/stuck jobs on startup
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        cleanup: bool,
+    },
+    /// Show worker status and active jobs
+    Status {
+        /// Queue name to filter by (optional)
+        #[arg(long)]
+        queue: Option<String>,
+        /// Show detailed information for a specific job (format: type:fid, e.g., social:66)
+        #[arg(long)]
+        job: Option<String>,
     },
 }
 
@@ -657,6 +672,30 @@ pub enum EmbeddingDataType {
     User,
     /// Backfill embeddings for cast content
     Cast,
+}
+
+#[derive(Subcommand)]
+pub enum CacheCommands {
+    /// Delete all cache entries
+    Clear {
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Delete cache for a specific FID
+    Delete {
+        /// FID to delete cache for
+        fid: i64,
+        /// Delete only profile cache
+        #[arg(long)]
+        profile_only: bool,
+        /// Delete only social cache
+        #[arg(long)]
+        social_only: bool,
+        /// Delete only MBTI cache
+        #[arg(long)]
+        mbti_only: bool,
+    },
 }
 
 #[derive(ValueEnum, Clone)]

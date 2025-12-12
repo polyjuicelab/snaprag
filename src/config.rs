@@ -110,6 +110,9 @@ pub struct CacheConfig {
     /// Social analysis cache TTL in seconds (default: 1 hour)
     #[serde(default = "default_social_ttl")]
     pub social_ttl_secs: u64,
+    /// Cast statistics cache TTL in seconds (default: 30 minutes)
+    #[serde(default = "default_cast_stats_ttl")]
+    pub cast_stats_ttl_secs: u64,
     /// Maximum number of cache entries
     #[serde(default = "default_max_cache_entries")]
     pub max_entries: usize,
@@ -175,6 +178,10 @@ const fn default_profile_ttl() -> u64 {
 
 const fn default_social_ttl() -> u64 {
     3600 // 1 hour
+}
+
+const fn default_cast_stats_ttl() -> u64 {
+    86400 // 1 day
 }
 
 const fn default_max_cache_entries() -> usize {
@@ -560,8 +567,9 @@ impl Default for AppConfig {
             },
             cache: CacheConfig {
                 enabled: true,
-                profile_ttl_secs: 3600, // 1 hour
-                social_ttl_secs: 3600,  // 1 hour
+                profile_ttl_secs: 3600,     // 1 hour
+                social_ttl_secs: 3600,      // 1 hour
+                cast_stats_ttl_secs: 86400, // 1 day
                 max_entries: 10000,
                 enable_stats: true,
             },

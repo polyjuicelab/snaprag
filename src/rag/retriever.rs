@@ -213,11 +213,10 @@ impl Reranker {
             })
             .collect();
 
-        // Sort by score descending, treating NaN as lowest value
+        // Sort by score descending, using total_cmp for total ordering
         final_results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            // Use total_cmp for f32 which provides a total ordering (handles NaN)
+            b.score.total_cmp(&a.score)
         });
         final_results
     }
@@ -225,11 +224,10 @@ impl Reranker {
     /// Simple score-based reranking
     #[must_use]
     pub fn rerank_by_score(mut results: Vec<SearchResult>) -> Vec<SearchResult> {
-        // Sort by score descending, treating NaN as lowest value
+        // Sort by score descending, using total_cmp for total ordering
         results.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            // Use total_cmp for f32 which provides a total ordering (handles NaN)
+            b.score.total_cmp(&a.score)
         });
         results
     }
