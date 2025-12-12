@@ -43,6 +43,10 @@ pub async fn search_profiles(
                     location: r.profile.location,
                     twitter_username: r.profile.twitter_username,
                     github_username: r.profile.github_username,
+                    registered_at: None,
+                    total_casts: None,
+                    total_reactions: None,
+                    total_links: None,
                 })
                 .collect();
             Ok(Json(ApiResponse::success(response)))

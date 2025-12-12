@@ -11,6 +11,7 @@ use serde::Serialize;
 use tracing::error;
 use tracing::info;
 
+use crate::api::handlers::job_helpers::*;
 use crate::api::handlers::AppState;
 use crate::api::types::ApiResponse;
 use crate::config::MbtiMethod;
@@ -23,6 +24,8 @@ pub async fn get_mbti_analysis(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     let start_time = std::time::Instant::now();
     info!("GET /api/mbti/{}", fid);
+
+    let job_key = format!("mbti:{}", fid);
 
     // Check cache first
     match state.cache_service.get_mbti(fid).await {
@@ -41,13 +44,24 @@ pub async fn get_mbti_analysis(
             return Ok(Json(ApiResponse::success(mbti_data)));
         }
         Ok(crate::api::cache::CacheResult::Stale(cached_mbti)) => {
-            // Stale cache - return stale data (MBTI doesn't need background update as it's less critical)
-            let duration = start_time.elapsed();
+            // Stale cache - return stale data and trigger background update
             info!(
-                "📦 MBTI cache hit (stale) for FID {} - {}ms",
-                fid,
-                duration.as_millis()
+                "📦 MBTI cache hit (stale) for FID {}, triggering background update",
+                fid
             );
+
+            // Trigger background update if Redis is available
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    let job_data = serde_json::json!({"fid": fid, "type": "mbti"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("mbti", &job_key, &job_data).await {
+                        info!("🔄 Triggered background update for FID {}", fid);
+                    }
+                }
+            }
+
+            let duration = start_time.elapsed();
             let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
                 serde_json::json!({
                     "error": "Failed to serialize cached MBTI profile"
@@ -57,12 +71,23 @@ pub async fn get_mbti_analysis(
         }
         Ok(crate::api::cache::CacheResult::Updating(cached_mbti)) => {
             // Cache expired - return updating status with old data
-            let duration = start_time.elapsed();
             info!(
-                "🔄 MBTI cache expired (updating) for FID {} - {}ms",
-                fid,
-                duration.as_millis()
+                "🔄 MBTI cache expired (updating) for FID {}, returning old data with updating status",
+                fid
             );
+
+            // Trigger background update if Redis is available
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    let job_data = serde_json::json!({"fid": fid, "type": "mbti"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("mbti", &job_key, &job_data).await {
+                        info!("🔄 Triggered background update for FID {}", fid);
+                    }
+                }
+            }
+
+            let duration = start_time.elapsed();
             let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
                 serde_json::json!({
                     "error": "Failed to serialize cached MBTI profile"
@@ -76,13 +101,67 @@ pub async fn get_mbti_analysis(
             }))));
         }
         Ok(crate::api::cache::CacheResult::Miss) => {
-            // Cache miss - continue to process
+            tracing::debug!(
+                "No cache hit for MBTI analysis FID {}, checking job status",
+                fid
+            );
         }
         Err(e) => {
             error!("Cache error for FID {}: {}", fid, e);
             // Continue to process
         }
     }
+
+    // Cache miss - check if job is already processing
+    let job_config = JobConfig {
+        job_type: "mbti",
+        job_key: job_key.clone(),
+        fid,
+    };
+    match check_or_create_job(&state, &job_config).await {
+        JobResult::AlreadyExists(status) => {
+            let message = match status.as_str() {
+                "pending" => "Analysis is queued, please check back later",
+                "processing" => "Analysis in progress, please check back later",
+                "completed" => {
+                    // Job completed but cache not updated yet - try to get result from status
+                    if let Some(redis_cfg) = &state.config.redis {
+                        if let Ok(redis_client) =
+                            crate::api::redis_client::RedisClient::connect(redis_cfg)
+                        {
+                            if let Ok(Some((_, Some(result_json)))) =
+                                redis_client.get_job_status(&job_key).await
+                            {
+                                // Try to parse the result and return it
+                                if let Ok(mbti_data) =
+                                    serde_json::from_str::<serde_json::Value>(&result_json)
+                                {
+                                    return Ok(Json(ApiResponse::success(mbti_data)));
+                                }
+                            }
+                        }
+                    }
+                    "Analysis completed, refreshing cache..."
+                }
+                "failed" => "Analysis failed, please try again",
+                _ => "Analysis in progress, please check back later",
+            };
+            return Ok(create_job_status_response(&job_key, &status, message));
+        }
+        JobResult::Created => {
+            return Ok(create_job_status_response(
+                &job_key,
+                "pending",
+                "Analysis started, please check back later",
+            ));
+        }
+        JobResult::Failed => {
+            // Fall through to synchronous processing
+        }
+    }
+
+    // Fallback: process synchronously if Redis is not available
+    error!("Redis not available, falling back to synchronous processing");
 
     // Get user profile first (for validation)
     let profile = match state.database.get_user_profile(fid).await {
@@ -238,12 +317,15 @@ pub async fn get_mbti_analysis_by_username(
         }
     };
 
+    let fid = profile.fid;
+    let job_key = format!("mbti:{}", fid);
+
     // Check cache first for the FID
-    match state.cache_service.get_mbti(profile.fid).await {
+    match state.cache_service.get_mbti(fid).await {
         Ok(crate::api::cache::CacheResult::Fresh(cached_mbti)) => {
             info!(
                 "📦 MBTI cache hit (fresh) for username {} (FID {})",
-                username, profile.fid
+                username, fid
             );
             let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
                 serde_json::json!({
@@ -253,10 +335,22 @@ pub async fn get_mbti_analysis_by_username(
             return Ok(Json(ApiResponse::success(mbti_data)));
         }
         Ok(crate::api::cache::CacheResult::Stale(cached_mbti)) => {
+            // Stale cache - return stale data and trigger background update
             info!(
-                "📦 MBTI cache hit (stale) for username {} (FID {})",
-                username, profile.fid
+                "📦 MBTI cache hit (stale) for username {} (FID {}), triggering background update",
+                username, fid
             );
+
+            // Trigger background update if Redis is available
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    let job_data = serde_json::json!({"fid": fid, "type": "mbti"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("mbti", &job_key, &job_data).await {
+                        info!("🔄 Triggered background update for FID {}", fid);
+                    }
+                }
+            }
             let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
                 serde_json::json!({
                     "error": "Failed to serialize cached MBTI profile"
@@ -267,8 +361,19 @@ pub async fn get_mbti_analysis_by_username(
         Ok(crate::api::cache::CacheResult::Updating(cached_mbti)) => {
             info!(
                 "🔄 MBTI cache expired (updating) for username {} (FID {})",
-                username, profile.fid
+                username, fid
             );
+
+            // Trigger background update if Redis is available
+            if let Some(redis_cfg) = &state.config.redis {
+                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
+                {
+                    let job_data = serde_json::json!({"fid": fid, "type": "mbti"}).to_string();
+                    if let Ok(Some(_)) = redis_client.push_job("mbti", &job_key, &job_data).await {
+                        info!("🔄 Triggered background update for FID {}", fid);
+                    }
+                }
+            }
             let mbti_data = serde_json::to_value(&cached_mbti).unwrap_or_else(|_| {
                 serde_json::json!({
                     "error": "Failed to serialize cached MBTI profile"
@@ -281,8 +386,59 @@ pub async fn get_mbti_analysis_by_username(
                 "message": "MBTI data is being updated in the background. Please refresh to get the latest data."
             }))));
         }
-        Ok(crate::api::cache::CacheResult::Miss) | Err(_) => {
-            // Cache miss or error - continue to process
+        Ok(crate::api::cache::CacheResult::Miss) => {
+            // Cache miss - check if job is already processing
+            let job_config = JobConfig {
+                job_type: "mbti",
+                job_key: job_key.clone(),
+                fid,
+            };
+            match check_or_create_job(&state, &job_config).await {
+                JobResult::AlreadyExists(status) => {
+                    let message = match status.as_str() {
+                        "pending" => "Analysis is queued, please check back later",
+                        "processing" => "Analysis in progress, please check back later",
+                        "completed" => {
+                            // Job completed but cache not updated yet - try to get result from status
+                            if let Some(redis_cfg) = &state.config.redis {
+                                if let Ok(redis_client) =
+                                    crate::api::redis_client::RedisClient::connect(redis_cfg)
+                                {
+                                    if let Ok(Some((_, Some(result_json)))) =
+                                        redis_client.get_job_status(&job_key).await
+                                    {
+                                        // Try to parse the result and return it
+                                        if let Ok(mbti_data) =
+                                            serde_json::from_str::<serde_json::Value>(&result_json)
+                                        {
+                                            return Ok(Json(ApiResponse::success(mbti_data)));
+                                        }
+                                    }
+                                }
+                            }
+                            "Analysis completed, refreshing cache..."
+                        }
+                        "failed" => "Analysis failed, please try again",
+                        _ => "Analysis in progress, please check back later",
+                    };
+                    return Ok(create_job_status_response(&job_key, &status, message));
+                }
+                JobResult::Created => {
+                    return Ok(create_job_status_response(
+                        &job_key,
+                        "pending",
+                        "Analysis started, please check back later",
+                    ));
+                }
+                JobResult::Failed => {
+                    // Fall through to synchronous processing
+                    error!("Redis not available, falling back to synchronous processing");
+                }
+            }
+        }
+        Err(e) => {
+            error!("Cache error: {}", e);
+            // Continue to process synchronously
         }
     }
 
@@ -291,7 +447,7 @@ pub async fn get_mbti_analysis_by_username(
 
     // Try to get social profile from cache (if needed by method)
     let social_profile = if matches!(method, MbtiMethod::RuleBased | MbtiMethod::Ensemble) {
-        match state.cache_service.get_social(profile.fid).await {
+        match state.cache_service.get_social(fid).await {
             Ok(
                 crate::api::cache::CacheResult::Fresh(s) | crate::api::cache::CacheResult::Stale(s),
             ) => Some(s),
@@ -314,36 +470,30 @@ pub async fn get_mbti_analysis_by_username(
             } else {
                 MbtiAnalyzer::new(state.database.clone())
             };
-            analyzer
-                .analyze_mbti(profile.fid, social_profile.as_ref())
-                .await
+            analyzer.analyze_mbti(fid, social_profile.as_ref()).await
         }
         #[cfg(feature = "ml-mbti")]
         MbtiMethod::MachineLearning => {
             let ml_predictor = crate::personality_ml::MlMbtiPredictor::new(state.database.clone())?;
-            ml_predictor.predict_mbti(profile.fid).await
+            ml_predictor.predict_mbti(fid).await
         }
         #[cfg(not(feature = "ml-mbti"))]
         MbtiMethod::MachineLearning => {
             let analyzer = MbtiAnalyzer::new(state.database.clone());
-            analyzer
-                .analyze_mbti(profile.fid, social_profile.as_ref())
-                .await
+            analyzer.analyze_mbti(fid, social_profile.as_ref()).await
         }
         #[cfg(feature = "ml-mbti")]
         MbtiMethod::Ensemble => {
             let ensemble =
                 crate::personality_ml::EnsembleMbtiPredictor::new(state.database.clone())?;
             ensemble
-                .predict_ensemble(profile.fid, social_profile.as_ref())
+                .predict_ensemble(fid, social_profile.as_ref())
                 .await
         }
         #[cfg(not(feature = "ml-mbti"))]
         MbtiMethod::Ensemble => {
             let analyzer = MbtiAnalyzer::new(state.database.clone());
-            analyzer
-                .analyze_mbti(profile.fid, social_profile.as_ref())
-                .await
+            analyzer.analyze_mbti(fid, social_profile.as_ref()).await
         }
     };
 
@@ -351,11 +501,7 @@ pub async fn get_mbti_analysis_by_username(
     match analysis_result {
         Ok(mbti_profile) => {
             // Cache the result
-            if let Err(e) = state
-                .cache_service
-                .set_mbti(profile.fid, &mbti_profile)
-                .await
-            {
+            if let Err(e) = state.cache_service.set_mbti(fid, &mbti_profile).await {
                 error!("Failed to cache MBTI profile: {}", e);
             }
 
@@ -367,14 +513,14 @@ pub async fn get_mbti_analysis_by_username(
 
             info!(
                 "✅ GET /api/mbti/username/{} (FID {}) - type: {}, confidence: {:.2}",
-                username, profile.fid, mbti_profile.mbti_type, mbti_profile.confidence
+                username, fid, mbti_profile.mbti_type, mbti_profile.confidence
             );
             Ok(Json(ApiResponse::success(mbti_data)))
         }
         Err(e) => {
             error!(
                 "Failed to analyze MBTI for username {} (FID {}): {}",
-                username, profile.fid, e
+                username, fid, e
             );
             Ok(Json(ApiResponse::error(format!(
                 "Failed to analyze MBTI: {e}"

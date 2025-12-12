@@ -173,6 +173,18 @@ pub struct ProfileResponse {
     pub location: Option<String>,
     pub twitter_username: Option<String>,
     pub github_username: Option<String>,
+    /// Registration timestamp (Unix timestamp in seconds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registered_at: Option<i64>,
+    /// Total number of casts (posts) by this user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_casts: Option<i64>,
+    /// Total number of reactions given by this user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_reactions: Option<i64>,
+    /// Total number of links (follows) by this user
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_links: Option<i64>,
 }
 
 /// Cast response
@@ -245,4 +257,48 @@ pub struct FetchResponse {
     pub casts_count: usize,
     pub embeddings_generated: Option<usize>,
     pub source: String, // "database" or "snapchain"
+}
+
+/// Cast statistics request (query parameters)
+#[derive(Debug, Deserialize)]
+pub struct CastStatsRequest {
+    /// Start timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub start_timestamp: Option<i64>,
+    /// End timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub end_timestamp: Option<i64>,
+}
+
+/// Daily date distribution entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DateDistributionEntry {
+    pub date: String, // YYYY-MM-DD format
+    pub count: i64,
+}
+
+/// Word frequency entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WordFrequency {
+    pub word: String,
+    pub count: i64,
+    pub language: String, // ISO 639-1 language code (e.g., "en", "zh")
+}
+
+/// Cast statistics response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CastStatsResponse {
+    pub total_casts: i64,
+    pub date_range: DateRange,
+    pub date_distribution: Vec<DateDistributionEntry>,
+    pub language_distribution: std::collections::HashMap<String, i64>,
+    pub top_nouns: Vec<WordFrequency>,
+    pub top_verbs: Vec<WordFrequency>,
+}
+
+/// Date range
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DateRange {
+    pub start: String, // ISO 8601 format
+    pub end: String,   // ISO 8601 format
 }
