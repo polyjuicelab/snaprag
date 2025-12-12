@@ -10,6 +10,7 @@ use tracing::error;
 use tracing::info;
 
 use crate::api::cache::CacheService;
+use crate::api::handlers::job_helpers::*;
 use crate::api::types::ApiResponse;
 use crate::api::types::FetchResponse;
 use crate::api::types::FetchUsersBatchRequest;
@@ -28,7 +29,9 @@ use crate::rag::Retriever;
 use crate::social_graph::SocialGraphAnalyzer;
 
 // Re-export sub-modules
+pub mod cast_stats;
 pub mod chat;
+pub mod job_helpers;
 pub mod mbti;
 pub mod metrics;
 pub mod profile;
@@ -37,7 +40,9 @@ pub mod search;
 pub mod stats;
 
 // Re-export handlers
+pub use cast_stats::*;
 pub use chat::*;
+pub use job_helpers::*;
 pub use mbti::*;
 pub use metrics::*;
 pub use profile::*;
@@ -96,6 +101,10 @@ pub async fn fetch_user(
                 location: profile.location,
                 twitter_username: profile.twitter_username,
                 github_username: profile.github_username,
+                registered_at: None,
+                total_casts: Some(casts_count as i64),
+                total_reactions: None,
+                total_links: None,
             },
             casts_count,
             embeddings_generated: None,
@@ -118,6 +127,10 @@ pub async fn fetch_user(
                     location: profile.location,
                     twitter_username: profile.twitter_username,
                     github_username: profile.github_username,
+                    registered_at: None,
+                    total_casts: Some(casts_count as i64),
+                    total_reactions: None,
+                    total_links: None,
                 },
                 casts_count,
                 embeddings_generated: None,
@@ -178,6 +191,10 @@ pub async fn fetch_users_batch(
                     location: profile.location,
                     twitter_username: profile.twitter_username,
                     github_username: profile.github_username,
+                    registered_at: None,
+                    total_casts: Some(casts_count as i64),
+                    total_reactions: None,
+                    total_links: None,
                 },
                 casts_count,
                 embeddings_generated: None,
@@ -207,6 +224,10 @@ pub async fn fetch_users_batch(
                         location: profile.location,
                         twitter_username: profile.twitter_username,
                         github_username: profile.github_username,
+                        registered_at: None,
+                        total_casts: Some(casts_count as i64),
+                        total_reactions: None,
+                        total_links: None,
                     },
                     casts_count,
                     embeddings_generated: None,
@@ -257,17 +278,12 @@ pub async fn get_social_analysis(
                 fid
             );
 
-            // Trigger background update if Redis is available
-            if let Some(redis_cfg) = &state.config.redis {
-                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
-                {
-                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
-                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
-                    {
-                        info!("🔄 Triggered background update for FID {}", fid);
-                    }
-                }
-            }
+            let job_config = JobConfig {
+                job_type: "social",
+                job_key: job_key.clone(),
+                fid,
+            };
+            trigger_background_update(&state, &job_config).await;
 
             let duration = start_time.elapsed();
             let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
@@ -284,30 +300,17 @@ pub async fn get_social_analysis(
                 fid
             );
 
-            // Trigger background update if Redis is available
-            if let Some(redis_cfg) = &state.config.redis {
-                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
-                {
-                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
-                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
-                    {
-                        info!("🔄 Triggered background update for FID {}", fid);
-                    }
-                }
-            }
+            let job_config = JobConfig {
+                job_type: "social",
+                job_key: job_key.clone(),
+                fid,
+            };
+            trigger_background_update(&state, &job_config).await;
 
-            let duration = start_time.elapsed();
-            let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
-                serde_json::json!({
-                    "error": "Failed to serialize cached social profile"
-                })
-            });
-            // Return with updating status
-            return Ok(Json(ApiResponse::success(serde_json::json!({
-                "status": "updating",
-                "data": social_data,
-                "message": "Data is being updated in the background. Please refresh to get the latest data."
-            }))));
+            return Ok(create_updating_response(
+                &cached_social,
+                "Data is being updated in the background. Please refresh to get the latest data.",
+            ));
         }
         Ok(crate::api::cache::CacheResult::Miss) => {
             tracing::debug!(
@@ -322,29 +325,50 @@ pub async fn get_social_analysis(
     }
 
     // Cache miss - check if job is already processing
-    if let Some(redis_cfg) = &state.config.redis {
-        if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg) {
-            // Check if job is already active
-            if redis_client.is_job_active(&job_key).await.unwrap_or(false) {
-                // Job already in queue or processing
-                info!("⏳ Job already processing for FID {}", fid);
-                return Ok(Json(ApiResponse::success(serde_json::json!({
-                    "status": "pending",
-                    "job_key": job_key,
-                    "message": "Analysis in progress, please check back later"
-                }))));
-            }
-
-            // Create new job
-            let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
-            if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await {
-                info!("📤 Created background job for FID {}", fid);
-                return Ok(Json(ApiResponse::success(serde_json::json!({
-                    "status": "pending",
-                    "job_key": job_key,
-                    "message": "Analysis started, please check back later"
-                }))));
-            }
+    let job_config = JobConfig {
+        job_type: "social",
+        job_key: job_key.clone(),
+        fid,
+    };
+    match check_or_create_job(&state, &job_config).await {
+        JobResult::AlreadyExists(status) => {
+            let message = match status.as_str() {
+                "pending" => "Analysis is queued, please check back later",
+                "processing" => "Analysis in progress, please check back later",
+                "completed" => {
+                    // Job completed but cache not updated yet - try to get result from status
+                    if let Some(redis_cfg) = &state.config.redis {
+                        if let Ok(redis_client) =
+                            crate::api::redis_client::RedisClient::connect(redis_cfg)
+                        {
+                            if let Ok(Some((_, Some(result_json)))) =
+                                redis_client.get_job_status(&job_key).await
+                            {
+                                // Try to parse the result and return it
+                                if let Ok(social_data) =
+                                    serde_json::from_str::<serde_json::Value>(&result_json)
+                                {
+                                    return Ok(Json(ApiResponse::success(social_data)));
+                                }
+                            }
+                        }
+                    }
+                    "Analysis completed, refreshing cache..."
+                }
+                "failed" => "Analysis failed, please try again",
+                _ => "Analysis in progress, please check back later",
+            };
+            return Ok(create_job_status_response(&job_key, &status, message));
+        }
+        JobResult::Created => {
+            return Ok(create_job_status_response(
+                &job_key,
+                "pending",
+                "Analysis started, please check back later",
+            ));
+        }
+        JobResult::Failed => {
+            // Fall through to synchronous processing
         }
     }
 
@@ -468,17 +492,12 @@ pub async fn get_social_analysis_by_username(
             // Stale cache - return stale data and trigger background update
             info!("📦 Social cache hit (stale) for username {} (FID {}), triggering background update", username, fid);
 
-            // Trigger background update if Redis is available
-            if let Some(redis_cfg) = &state.config.redis {
-                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
-                {
-                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
-                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
-                    {
-                        info!("🔄 Triggered background update for FID {}", fid);
-                    }
-                }
-            }
+            let job_config = JobConfig {
+                job_type: "social",
+                job_key: job_key.clone(),
+                fid,
+            };
+            trigger_background_update(&state, &job_config).await;
 
             let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
                 serde_json::json!({
@@ -491,62 +510,67 @@ pub async fn get_social_analysis_by_username(
             // Cache expired - return updating status with old data
             info!("🔄 Social cache expired (updating) for username {} (FID {}), returning old data with updating status", username, fid);
 
-            // Trigger background update if Redis is available
-            if let Some(redis_cfg) = &state.config.redis {
-                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
-                {
-                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
-                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
-                    {
-                        info!("🔄 Triggered background update for FID {}", fid);
-                    }
-                }
-            }
+            let job_config = JobConfig {
+                job_type: "social",
+                job_key: job_key.clone(),
+                fid,
+            };
+            trigger_background_update(&state, &job_config).await;
 
-            let social_data = serde_json::to_value(&cached_social).unwrap_or_else(|_| {
-                serde_json::json!({
-                    "error": "Failed to serialize cached social profile"
-                })
-            });
-            // Return with updating status
-            return Ok(Json(ApiResponse::success(serde_json::json!({
-                "status": "updating",
-                "data": social_data,
-                "message": "Data is being updated in the background. Please refresh to get the latest data."
-            }))));
+            return Ok(create_updating_response(
+                &cached_social,
+                "Data is being updated in the background. Please refresh to get the latest data.",
+            ));
         }
         Ok(crate::api::cache::CacheResult::Miss) => {
             // Cache miss - check if job is already processing
-            if let Some(redis_cfg) = &state.config.redis {
-                if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg)
-                {
-                    // Check if job is already active
-                    if redis_client.is_job_active(&job_key).await.unwrap_or(false) {
-                        // Job already in queue or processing
-                        info!("⏳ Job already processing for FID {}", fid);
-                        return Ok(Json(ApiResponse::success(serde_json::json!({
-                            "status": "pending",
-                            "job_key": job_key,
-                            "message": "Analysis in progress, please check back later"
-                        }))));
-                    }
-
-                    // Create new job
-                    let job_data = serde_json::json!({"fid": fid, "type": "social"}).to_string();
-                    if let Ok(Some(_)) = redis_client.push_job("social", &job_key, &job_data).await
-                    {
-                        info!("📤 Created background job for FID {}", fid);
-                        return Ok(Json(ApiResponse::success(serde_json::json!({
-                            "status": "pending",
-                            "job_key": job_key,
-                            "message": "Analysis started, please check back later"
-                        }))));
-                    }
+            let job_config = JobConfig {
+                job_type: "social",
+                job_key: job_key.clone(),
+                fid,
+            };
+            match check_or_create_job(&state, &job_config).await {
+                JobResult::AlreadyExists(status) => {
+                    let message = match status.as_str() {
+                        "pending" => "Analysis is queued, please check back later",
+                        "processing" => "Analysis in progress, please check back later",
+                        "completed" => {
+                            // Job completed but cache not updated yet - try to get result from status
+                            if let Some(redis_cfg) = &state.config.redis {
+                                if let Ok(redis_client) =
+                                    crate::api::redis_client::RedisClient::connect(redis_cfg)
+                                {
+                                    if let Ok(Some((_, Some(result_json)))) =
+                                        redis_client.get_job_status(&job_key).await
+                                    {
+                                        // Try to parse the result and return it
+                                        if let Ok(social_data) =
+                                            serde_json::from_str::<serde_json::Value>(&result_json)
+                                        {
+                                            return Ok(Json(ApiResponse::success(social_data)));
+                                        }
+                                    }
+                                }
+                            }
+                            "Analysis completed, refreshing cache..."
+                        }
+                        "failed" => "Analysis failed, please try again",
+                        _ => "Analysis in progress, please check back later",
+                    };
+                    return Ok(create_job_status_response(&job_key, &status, message));
+                }
+                JobResult::Created => {
+                    return Ok(create_job_status_response(
+                        &job_key,
+                        "pending",
+                        "Analysis started, please check back later",
+                    ));
+                }
+                JobResult::Failed => {
+                    // Fall through to synchronous processing
+                    error!("Redis not available, falling back to synchronous processing");
                 }
             }
-
-            // Fallback: process synchronously if Redis is not available
-            error!("Redis not available, falling back to synchronous processing");
         }
         Err(e) => {
             error!("Cache error: {}", e);
