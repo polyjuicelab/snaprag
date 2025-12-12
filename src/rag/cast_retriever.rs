@@ -370,9 +370,8 @@ impl CastRetriever {
             .collect();
 
         merged.sort_by(|a, b| {
-            b.similarity
-                .partial_cmp(&a.similarity)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            // Use total_cmp for f32 which provides a total ordering (handles NaN)
+            b.similarity.total_cmp(&a.similarity)
         });
 
         merged

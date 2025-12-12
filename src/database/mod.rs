@@ -72,6 +72,7 @@ mod user_data_changes;
 mod user_profiles;
 mod user_snapshots;
 mod username_proofs;
+mod verifications;
 
 // Re-export public types
 pub use casts::CastThread;
@@ -177,5 +178,62 @@ impl Database {
     #[must_use]
     pub const fn pool(&self) -> &sqlx::PgPool {
         &self.pool
+    }
+
+    /// Get long-running queries that may be stuck
+    ///
+    /// Returns queries that have been running for more than the specified duration (in seconds).
+    /// Excludes system processes like autovacuum.
+    ///
+    /// # Arguments
+    ///
+    /// * `min_duration_secs` - Minimum query duration in seconds to consider as "long-running" (default: 30)
+    ///
+    /// # Returns
+    ///
+    /// Vector of tuples: (pid, duration_secs, state, query, application_name, client_addr)
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use snaprag::Database;
+    ///
+    /// # async fn example(database: &Database) -> snaprag::Result<()> {
+    /// let stuck_queries = database.get_long_running_queries(30).await?;
+    /// for (pid, duration, state, query, app, addr) in stuck_queries {
+    ///     println!("PID {}: running for {}s - {}", pid, duration, query);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_long_running_queries(
+        &self,
+        min_duration_secs: i64,
+    ) -> Result<Vec<(i32, i64, String, String, Option<String>, Option<String>)>> {
+        let rows = sqlx::query_as::<_, (i32, i64, String, String, Option<String>, Option<String>)>(
+            r#"
+            SELECT 
+                pid,
+                EXTRACT(EPOCH FROM (NOW() - query_start))::bigint as duration_secs,
+                state,
+                COALESCE(SUBSTRING(query, 1, 200), '') as query_preview,
+                application_name,
+                client_addr::text
+            FROM pg_stat_activity
+            WHERE 
+                datname = current_database()
+                AND pid != pg_backend_pid()
+                AND state != 'idle'
+                AND state != 'idle in transaction (aborted)'
+                AND query NOT LIKE '%pg_stat_activity%'
+                AND EXTRACT(EPOCH FROM (NOW() - query_start)) > $1
+            ORDER BY query_start ASC
+            "#,
+        )
+        .bind(min_duration_secs)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
     }
 }

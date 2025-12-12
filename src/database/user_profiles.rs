@@ -424,6 +424,38 @@ impl Database {
         Ok(count)
     }
 
+    /// Get registration timestamp for a user (from onchain_events where event_type = 3)
+    pub async fn get_registration_timestamp(&self, fid: i64) -> Result<Option<i64>> {
+        let result: Option<(i64,)> = sqlx::query_as(
+            "SELECT MIN(block_timestamp) FROM onchain_events WHERE fid = $1 AND event_type = 3",
+        )
+        .bind(fid)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result.map(|(ts,)| ts))
+    }
+
+    /// Count reactions for a specific FID
+    pub async fn count_reactions_by_fid(&self, fid: i64) -> Result<i64> {
+        let (count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM reactions WHERE fid = $1 AND event_type = 'add'")
+                .bind(fid)
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(count)
+    }
+
+    /// Count links (follows) for a specific FID
+    pub async fn count_links_by_fid(&self, fid: i64) -> Result<i64> {
+        let (count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM links WHERE fid = $1 AND event_type = 'add'")
+                .bind(fid)
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(count)
+    }
+
     /// Get statistics
     pub async fn get_statistics(
         &self,
