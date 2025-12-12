@@ -22,6 +22,18 @@ pub fn api_routes(state: AppState) -> Router {
             "/profiles/username/:username",
             get(handlers::get_profile_by_username),
         )
+        .route(
+            "/profiles/address/:address",
+            get(handlers::get_profile_by_address),
+        )
+        .route(
+            "/profiles/address/ethereum/:address",
+            get(handlers::get_profile_by_ethereum_address),
+        )
+        .route(
+            "/profiles/address/solana/:address",
+            get(handlers::get_profile_by_solana_address),
+        )
         // Fetch endpoints (lazy loading)
         .route("/fetch/user/:fid", post(handlers::fetch_user))
         .route("/fetch/users", post(handlers::fetch_users_batch))
@@ -40,6 +52,8 @@ pub fn api_routes(state: AppState) -> Router {
         )
         // Statistics
         .route("/stats", get(handlers::get_stats))
+        // Cast statistics
+        .route("/casts/stats/:fid", get(handlers::get_cast_stats))
         // Prometheus metrics
         .route("/metrics", get(handlers::get_metrics))
         // Social graph endpoints

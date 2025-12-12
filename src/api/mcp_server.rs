@@ -97,7 +97,8 @@ pub async fn serve_mcp(
                 profile_ttl: std::time::Duration::from_secs(config.cache.profile_ttl_secs),
                 social_ttl: std::time::Duration::from_secs(config.cache.social_ttl_secs),
                 mbti_ttl: std::time::Duration::from_secs(7200), // 2 hours for MBTI
-                stale_threshold: std::time::Duration::from_secs(0), // No stale threshold - expired data is permanently available
+                cast_stats_ttl: std::time::Duration::from_secs(config.cache.cast_stats_ttl_secs),
+                stale_threshold: std::time::Duration::from_secs(redis_cfg.stale_threshold_secs),
                 enable_stats: config.cache.enable_stats,
             },
         ))

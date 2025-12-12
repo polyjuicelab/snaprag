@@ -74,8 +74,14 @@ impl LlmConfig {
             provider,
             model,
             endpoint: config.llm_endpoint().to_string(),
-            api_key: if provider == LlmProvider::OpenAI {
-                Some(config.llm_key().to_string())
+            api_key: if provider == LlmProvider::OpenAI || provider == LlmProvider::Custom {
+                // Both OpenAI and Custom providers may need API keys
+                // For Custom, use the key if it's not "ollama" (which is the Ollama marker)
+                if provider == LlmProvider::Custom && config.llm_key() == "ollama" {
+                    None
+                } else {
+                    Some(config.llm_key().to_string())
+                }
             } else {
                 None
             },

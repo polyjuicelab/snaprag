@@ -101,7 +101,7 @@ impl LlmClient {
         match self.provider {
             LlmProvider::OpenAI => self.generate_openai(prompt, temperature, max_tokens).await,
             LlmProvider::Ollama => self.generate_ollama(prompt, temperature, max_tokens).await,
-            LlmProvider::Custom => self.generate_custom(prompt, temperature, max_tokens),
+            LlmProvider::Custom => self.generate_custom(prompt, temperature, max_tokens).await,
         }
     }
 
@@ -138,7 +138,6 @@ impl LlmClient {
     /// - LLM API call errors (network, authentication, rate limits)
     /// - Invalid response format
     /// - JSON parsing errors
-    /// - Not supported for custom provider
     pub async fn chat(
         &self,
         messages: Vec<ChatMessage>,
@@ -148,9 +147,7 @@ impl LlmClient {
         match self.provider {
             LlmProvider::OpenAI => self.chat_openai(messages, temperature, max_tokens).await,
             LlmProvider::Ollama => self.chat_ollama(messages, temperature, max_tokens).await,
-            LlmProvider::Custom => Err(SnapragError::LlmError(
-                "Chat not supported for custom provider".to_string(),
-            )),
+            LlmProvider::Custom => self.chat_custom(messages, temperature, max_tokens).await,
         }
     }
 
@@ -454,16 +451,94 @@ impl LlmClient {
         Ok(Self::wrap_in_stream(response))
     }
 
-    /// Custom provider completion
-    fn generate_custom(
+    /// Custom provider completion (OpenAI-compatible API)
+    async fn generate_custom(
         &self,
-        _prompt: &str,
-        _temperature: f32,
-        _max_tokens: usize,
+        prompt: &str,
+        temperature: f32,
+        max_tokens: usize,
     ) -> Result<String> {
-        Err(SnapragError::LlmError(
-            "Custom provider not yet implemented".to_string(),
-        ))
+        // Use chat API with single user message
+        self.chat_custom(vec![ChatMessage::user(prompt)], temperature, max_tokens)
+            .await
+    }
+
+    /// Custom provider chat completion (OpenAI-compatible API)
+    async fn chat_custom(
+        &self,
+        messages: Vec<ChatMessage>,
+        temperature: f32,
+        max_tokens: usize,
+    ) -> Result<String> {
+        // Custom provider uses OpenAI-compatible API format
+        let api_key = self.api_key.as_ref();
+
+        #[derive(Serialize)]
+        struct OpenAIRequest<'a> {
+            model: &'a str,
+            messages: Vec<ChatMessage>,
+            temperature: f32,
+            max_tokens: usize,
+        }
+
+        #[derive(Deserialize)]
+        struct OpenAIResponse {
+            choices: Vec<Choice>,
+        }
+
+        #[derive(Deserialize)]
+        struct Choice {
+            message: ChatMessage,
+        }
+
+        let url = format!("{}/chat/completions", self.endpoint);
+        debug!("Calling custom LLM API: {}", url);
+
+        let request = OpenAIRequest {
+            model: &self.model,
+            messages,
+            temperature,
+            max_tokens,
+        };
+
+        let mut req_builder = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json");
+
+        // Add Authorization header if API key is provided
+        if let Some(key) = api_key {
+            req_builder = req_builder.header("Authorization", format!("Bearer {key}"));
+        }
+
+        let response = req_builder
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| SnapragError::HttpError(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(SnapragError::LlmError(format!(
+                "Custom LLM API error ({status}): {error_text}"
+            )));
+        }
+
+        let result: OpenAIResponse = response
+            .json()
+            .await
+            .map_err(|e| SnapragError::LlmError(format!("Failed to parse response: {e}")))?;
+
+        result
+            .choices
+            .into_iter()
+            .next()
+            .map(|c| c.message.content)
+            .ok_or_else(|| SnapragError::LlmError("No response from custom LLM".to_string()))
     }
 
     /// Unified helper: Convert non-streaming response to streaming

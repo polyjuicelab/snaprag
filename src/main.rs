@@ -1,4 +1,5 @@
 use clap::Parser;
+use snaprag::cli::CacheCommands;
 use snaprag::cli::CastCommands;
 use snaprag::cli::CastEmbeddingAction;
 use snaprag::cli::Cli;
@@ -390,6 +391,9 @@ async fn main() -> Result<()> {
         } => {
             snaprag::cli::handle_mbti_analysis(&config, user, llm, verbose, export).await?;
         }
+        Commands::Cache(cache_command) => {
+            snaprag::cli::handle_cache_command(&snaprag, &cache_command).await?;
+        }
         Commands::Fetch(fetch_command) => match fetch_command {
             FetchCommands::User {
                 fid,
@@ -474,8 +478,15 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
-            ServeCommands::Worker { queue, workers } => {
-                snaprag::cli::handle_serve_worker(&config, queue, workers).await?;
+            ServeCommands::Worker {
+                queue,
+                workers,
+                cleanup,
+            } => {
+                snaprag::cli::handle_serve_worker(&config, queue, workers, cleanup).await?;
+            }
+            ServeCommands::Status { queue, job } => {
+                snaprag::cli::handle_worker_status(&config, queue, job).await?;
             }
         },
     }

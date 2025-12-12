@@ -140,6 +140,53 @@ impl Database {
         Ok(casts)
     }
 
+    /// Get casts by FID within a time range
+    ///
+    /// # Errors
+    /// - Database query errors (connection failures, SQL execution errors)
+    pub async fn get_casts_by_fid_and_time_range(
+        &self,
+        fid: i64,
+        start_timestamp: Option<i64>,
+        end_timestamp: Option<i64>,
+    ) -> Result<Vec<Cast>> {
+        let casts = if let (Some(start), Some(end)) = (start_timestamp, end_timestamp) {
+            sqlx::query_as::<_, Cast>(
+                "SELECT * FROM casts WHERE fid = $1 AND timestamp >= $2 AND timestamp <= $3 AND text IS NOT NULL AND text != '' ORDER BY timestamp DESC",
+            )
+            .bind(fid)
+            .bind(start)
+            .bind(end)
+            .fetch_all(&self.pool)
+            .await?
+        } else if let Some(start) = start_timestamp {
+            sqlx::query_as::<_, Cast>(
+                "SELECT * FROM casts WHERE fid = $1 AND timestamp >= $2 AND text IS NOT NULL AND text != '' ORDER BY timestamp DESC",
+            )
+            .bind(fid)
+            .bind(start)
+            .fetch_all(&self.pool)
+            .await?
+        } else if let Some(end) = end_timestamp {
+            sqlx::query_as::<_, Cast>(
+                "SELECT * FROM casts WHERE fid = $1 AND timestamp <= $2 AND text IS NOT NULL AND text != '' ORDER BY timestamp DESC",
+            )
+            .bind(fid)
+            .bind(end)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query_as::<_, Cast>(
+                "SELECT * FROM casts WHERE fid = $1 AND text IS NOT NULL AND text != '' ORDER BY timestamp DESC",
+            )
+            .bind(fid)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(casts)
+    }
+
     /// Count casts without embeddings (optimized for large datasets)
     pub async fn count_casts_without_embeddings(&self) -> Result<i64> {
         // For large datasets, it's much faster to calculate:
@@ -462,9 +509,8 @@ impl Database {
         // Convert back to Vec and sort by similarity
         let mut results: Vec<CastSearchResult> = deduplicated.into_values().collect();
         results.sort_by(|a, b| {
-            b.similarity
-                .partial_cmp(&a.similarity)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            // Use total_cmp for f32 which provides a total ordering (handles NaN)
+            b.similarity.total_cmp(&a.similarity)
         });
         results.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
 

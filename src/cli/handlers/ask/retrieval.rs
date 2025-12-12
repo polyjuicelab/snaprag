@@ -102,19 +102,50 @@ pub async fn find_relevant_casts(
     // Prioritize: relevance + substance + recency
     // Score = similarity * log(length) * recency_factor
     user_casts.sort_by(|a, b| {
+        // Helper function to calculate score safely, handling all edge cases
+        fn calculate_score(similarity: f32, text_len: usize, recency: f32) -> f32 {
+            // Ensure similarity is valid (not NaN, not negative, not inf)
+            let sim = if !similarity.is_finite() || similarity < 0.0 {
+                0.0
+            } else {
+                similarity.min(1.0) // Clamp to [0, 1]
+            };
+
+            // Ensure text length is at least 1 to avoid ln(0) = -inf
+            let len = text_len.max(1).min(10000); // Clamp to reasonable range
+            let substance = (len as f32).ln().max(1.0).min(10.0); // Clamp ln result
+
+            // Ensure recency is valid and clamped
+            let rec = if !recency.is_finite() || recency < 0.0 {
+                0.5
+            } else {
+                recency.min(1.0) // Clamp to [0, 1]
+            };
+
+            // Calculate score and ensure it's finite
+            let score = sim * substance * rec;
+
+            // Return 0.0 for any invalid scores
+            if !score.is_finite() || score < 0.0 {
+                0.0
+            } else {
+                score
+            }
+        }
+
         // Recency factor: 1.0 for recent (< 30 days), decays to 0.5 for old (> 1 year)
-        let age_days_first = ((now - a.timestamp) as f32) / 86400.0;
-        let age_days_second = ((now - b.timestamp) as f32) / 86400.0;
-        let recency_a = (1.0 - (age_days_first / 365.0).min(0.5)).max(0.5);
-        let recency_b = (1.0 - (age_days_second / 365.0).min(0.5)).max(0.5);
+        let age_days_a = ((now - a.timestamp) as f32) / 86400.0;
+        let age_days_b = ((now - b.timestamp) as f32) / 86400.0;
+        let recency_a = (1.0 - (age_days_a / 365.0).min(0.5)).max(0.5);
+        let recency_b = (1.0 - (age_days_b / 365.0).min(0.5)).max(0.5);
 
-        // Combine: similarity (most important) + substance + recency
-        let score_a = a.similarity * (a.text.len() as f32).ln().max(1.0) * recency_a;
-        let score_b = b.similarity * (b.text.len() as f32).ln().max(1.0) * recency_b;
+        // Calculate scores
+        let score_a = calculate_score(a.similarity, a.text.len(), recency_a);
+        let score_b = calculate_score(b.similarity, b.text.len(), recency_b);
 
-        score_b
-            .partial_cmp(&score_a)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        // Use total_cmp for f32 which provides a total ordering (handles NaN)
+        // Reverse order: higher scores first
+        score_b.total_cmp(&score_a)
     });
 
     // Take top results
