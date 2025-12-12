@@ -65,6 +65,8 @@ stop-words = "0.8"  # Stop words for multiple languages
 lazy_static = "1.4"  # For static AFINN lexicon
 jsonwebtoken = { version = "10.1", features = ["aws_lc_rs"] }  # Force newer version to fix ring 0.16.20 security issue
 prometheus = { version = "0.13", features = ["process"] }  # Prometheus metrics for monitoring
+whatlang = "0.18"  # Language detection for multi-language support
+jieba-rs = "0.6"  # Chinese word segmentation (default enabled)
 
 # Local GPU embedding dependencies (optional)
 # Note: Platform-specific features are defined in target-specific sections below
