@@ -79,6 +79,10 @@ async fn test_cache_set_and_get_fresh() {
         location: None,
         twitter_username: None,
         github_username: None,
+        registered_at: None,
+        total_casts: None,
+        total_reactions: None,
+        total_links: None,
     };
 
     // Set cache
@@ -453,6 +457,10 @@ async fn test_cache_statistics() {
         location: None,
         twitter_username: None,
         github_username: None,
+        registered_at: None,
+        total_casts: None,
+        total_reactions: None,
+        total_links: None,
     };
 
     // Set cache

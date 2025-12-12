@@ -13,6 +13,7 @@ use tracing::info;
 use tracing::warn;
 
 use crate::api::redis_client::RedisClient;
+use crate::api::types::CastStatsResponse;
 use crate::api::types::ProfileResponse;
 use crate::personality::MbtiProfile;
 use crate::social_graph::SocialProfile;
@@ -41,7 +42,10 @@ pub struct CacheConfig {
     pub social_ttl: Duration,
     /// Default TTL for MBTI analysis cache entries
     pub mbti_ttl: Duration,
-    /// Stale threshold - how long after expiry to still serve stale data
+    /// Default TTL for cast statistics cache entries
+    pub cast_stats_ttl: Duration,
+    /// Stale threshold - deprecated, no longer used (data is permanently stored in Redis)
+    /// Kept for API compatibility but not used in TTL calculations
     pub stale_threshold: Duration,
     /// Enable cache statistics
     pub enable_stats: bool,
@@ -50,10 +54,11 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            profile_ttl: Duration::from_secs(3600),  // 1 hour default
-            social_ttl: Duration::from_secs(3600),   // 1 hour default
-            mbti_ttl: Duration::from_secs(7200),     // 2 hours default (more stable)
-            stale_threshold: Duration::from_secs(0), // No stale threshold - expired data is permanently available
+            profile_ttl: Duration::from_secs(3600),     // 1 hour default
+            social_ttl: Duration::from_secs(3600),      // 1 hour default
+            mbti_ttl: Duration::from_secs(7200),        // 2 hours default (more stable)
+            cast_stats_ttl: Duration::from_secs(86400), // 1 day default
+            stale_threshold: Duration::from_secs(0), // Default: no stale threshold (should be set from config in production)
             enable_stats: true,
         }
     }
@@ -138,8 +143,8 @@ impl CacheService {
                         debug!("Social cache hit (fresh) for FID {}", fid);
                         return Ok(CacheResult::Fresh(social));
                     }
-                    // Expired but data still available - return as Updating
-                    // No stale_threshold limit - data is permanently available until replaced
+                    // Expired but data still available in Redis (permanent storage) - return as Updating
+                    // Data is permanently stored, expiration is determined by timestamp comparison only
                     self.increment_stale_hit().await;
                     debug!(
                         "Social cache expired (updating) for FID {}, age: {}s",
@@ -157,6 +162,7 @@ impl CacheService {
     }
 
     /// Cache a social analysis response
+    /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
     pub async fn set_social(&self, fid: i64, social: &SocialProfile) -> crate::Result<()> {
         let cache_key = self.cache_key("social", fid);
         let timestamp_key = self.timestamp_key("social", fid);
@@ -166,16 +172,11 @@ impl CacheService {
         })?;
         let timestamp = chrono::Utc::now().timestamp().to_string();
 
-        // Set cache with TTL (use TTL + stale_threshold to ensure data persists during stale period)
-        let total_ttl = self.config.social_ttl + self.config.stale_threshold;
-        self.redis
-            .set_json_with_ttl(&cache_key, &json_data, Some(total_ttl))
-            .await?;
-        self.redis
-            .set_json_with_ttl(&timestamp_key, &timestamp, Some(total_ttl))
-            .await?;
+        // Set cache permanently (no TTL) - data will only be updated, never deleted
+        self.redis.set_json(&cache_key, &json_data).await?;
+        self.redis.set_json(&timestamp_key, &timestamp).await?;
 
-        debug!("Cached social analysis for FID {}", fid);
+        debug!("Cached social analysis for FID {} (permanent storage)", fid);
         Ok(())
     }
 
@@ -198,8 +199,8 @@ impl CacheService {
                         self.increment_hit().await;
                         return Ok(CacheResult::Fresh(profile));
                     }
-                    // Expired but data still available - return as Updating
-                    // No stale_threshold limit - data is permanently available until replaced
+                    // Expired but data still available in Redis (permanent storage) - return as Updating
+                    // Data is permanently stored, expiration is determined by timestamp comparison only
                     self.increment_stale_hit().await;
                     debug!(
                         "Profile cache expired (updating) for FID {}, age: {}s",
@@ -215,6 +216,7 @@ impl CacheService {
     }
 
     /// Cache a profile response
+    /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
     pub async fn set_profile(&self, fid: i64, profile: &ProfileResponse) -> crate::Result<()> {
         let cache_key = self.cache_key("profile", fid);
         let timestamp_key = self.timestamp_key("profile", fid);
@@ -224,16 +226,11 @@ impl CacheService {
         })?;
         let timestamp = chrono::Utc::now().timestamp().to_string();
 
-        // Set cache with TTL (use TTL + stale_threshold to ensure data persists during stale period)
-        let total_ttl = self.config.profile_ttl + self.config.stale_threshold;
-        self.redis
-            .set_json_with_ttl(&cache_key, &json_data, Some(total_ttl))
-            .await?;
-        self.redis
-            .set_json_with_ttl(&timestamp_key, &timestamp, Some(total_ttl))
-            .await?;
+        // Set cache permanently (no TTL) - data will only be updated, never deleted
+        self.redis.set_json(&cache_key, &json_data).await?;
+        self.redis.set_json(&timestamp_key, &timestamp).await?;
 
-        debug!("Cached profile for FID {}", fid);
+        debug!("Cached profile for FID {} (permanent storage)", fid);
         Ok(())
     }
 
@@ -256,8 +253,8 @@ impl CacheService {
                         self.increment_hit().await;
                         return Ok(CacheResult::Fresh(mbti));
                     }
-                    // Expired but data still available - return as Updating
-                    // No stale_threshold limit - data is permanently available until replaced
+                    // Expired but data still available in Redis (permanent storage) - return as Updating
+                    // Data is permanently stored, expiration is determined by timestamp comparison only
                     self.increment_stale_hit().await;
                     debug!(
                         "MBTI cache expired (updating) for FID {}, age: {}s",
@@ -273,6 +270,7 @@ impl CacheService {
     }
 
     /// Cache an MBTI analysis response
+    /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
     pub async fn set_mbti(&self, fid: i64, mbti: &MbtiProfile) -> crate::Result<()> {
         let cache_key = self.cache_key("mbti", fid);
         let timestamp_key = self.timestamp_key("mbti", fid);
@@ -282,45 +280,183 @@ impl CacheService {
         })?;
         let timestamp = chrono::Utc::now().timestamp().to_string();
 
-        // Set cache with TTL (use TTL + stale_threshold to ensure data persists during stale period)
-        let total_ttl = self.config.mbti_ttl + self.config.stale_threshold;
-        self.redis
-            .set_json_with_ttl(&cache_key, &json_data, Some(total_ttl))
-            .await?;
-        self.redis
-            .set_json_with_ttl(&timestamp_key, &timestamp, Some(total_ttl))
-            .await?;
+        // Set cache permanently (no TTL) - data will only be updated, never deleted
+        self.redis.set_json(&cache_key, &json_data).await?;
+        self.redis.set_json(&timestamp_key, &timestamp).await?;
 
-        debug!("Cached MBTI analysis for FID {}", fid);
+        debug!("Cached MBTI analysis for FID {} (permanent storage)", fid);
         Ok(())
     }
 
-    /// Invalidate cached social analysis for a FID
-    pub fn invalidate_social(&self, fid: i64) -> crate::Result<()> {
-        // Note: Redis TTL will handle expiration, but we can explicitly delete if needed
-        debug!("Invalidated social cache for FID {}", fid);
+    /// Invalidate (delete) cached social analysis for a FID
+    pub async fn invalidate_social(&self, fid: i64) -> crate::Result<()> {
+        let cache_key = self.cache_key("social", fid);
+        let timestamp_key = self.timestamp_key("social", fid);
+
+        self.redis.delete(&cache_key).await?;
+        self.redis.delete(&timestamp_key).await?;
+        info!("Deleted social cache for FID {}", fid);
         Ok(())
     }
 
-    /// Invalidate cached profile for a FID
-    pub fn invalidate_profile(&self, fid: i64) -> crate::Result<()> {
-        debug!("Invalidated profile cache for FID {}", fid);
+    /// Invalidate (delete) cached profile for a FID
+    pub async fn invalidate_profile(&self, fid: i64) -> crate::Result<()> {
+        let cache_key = self.cache_key("profile", fid);
+        let timestamp_key = self.timestamp_key("profile", fid);
+
+        self.redis.delete(&cache_key).await?;
+        self.redis.delete(&timestamp_key).await?;
+        info!("Deleted profile cache for FID {}", fid);
         Ok(())
     }
 
-    /// Invalidate cached MBTI analysis for a FID
-    pub fn invalidate_mbti(&self, fid: i64) -> crate::Result<()> {
-        debug!("Invalidated MBTI cache for FID {}", fid);
+    /// Invalidate (delete) cached MBTI analysis for a FID
+    pub async fn invalidate_mbti(&self, fid: i64) -> crate::Result<()> {
+        let cache_key = self.cache_key("mbti", fid);
+        let timestamp_key = self.timestamp_key("mbti", fid);
+
+        self.redis.delete(&cache_key).await?;
+        self.redis.delete(&timestamp_key).await?;
+        info!("Deleted MBTI cache for FID {}", fid);
         Ok(())
     }
 
-    /// Invalidate all caches for a FID
-    pub fn invalidate_user(&self, fid: i64) -> crate::Result<()> {
-        self.invalidate_profile(fid)?;
-        self.invalidate_social(fid)?;
-        self.invalidate_mbti(fid)?;
-        debug!("Invalidated all caches for FID {}", fid);
+    /// Get cached cast statistics by FID (with optional date range)
+    pub async fn get_cast_stats_with_range(
+        &self,
+        fid: i64,
+        date_range: Option<&str>,
+    ) -> crate::Result<CacheResult<CastStatsResponse>> {
+        // Create cache key with date range if specified
+        let cache_key = if let Some(range) = date_range {
+            format!("cache:cast_stats:{}:{}", fid, range)
+        } else {
+            self.cache_key("cast_stats", fid)
+        };
+        let timestamp_key = if let Some(range) = date_range {
+            format!("cache:cast_stats:{}:{}:timestamp", fid, range)
+        } else {
+            self.timestamp_key("cast_stats", fid)
+        };
+
+        let cached_data = self.redis.get_json(&cache_key).await?;
+        let cached_timestamp = self.redis.get_json(&timestamp_key).await?;
+
+        if let (Some(data), Some(timestamp_str)) = (cached_data, cached_timestamp) {
+            if let Ok(timestamp) = timestamp_str.parse::<i64>() {
+                let now = chrono::Utc::now().timestamp();
+                let age = now - timestamp;
+                let ttl_secs = self.config.cast_stats_ttl.as_secs() as i64;
+
+                if let Ok(stats) = serde_json::from_str::<CastStatsResponse>(&data) {
+                    if age < ttl_secs {
+                        self.increment_hit().await;
+                        return Ok(CacheResult::Fresh(stats));
+                    }
+                    // Expired but data still available in Redis (permanent storage) - return as Updating
+                    self.increment_stale_hit().await;
+                    debug!(
+                        "Cast stats cache expired (updating) for FID {}, age: {}s",
+                        fid, age
+                    );
+                    return Ok(CacheResult::Updating(stats));
+                }
+            }
+        }
+
+        self.increment_miss().await;
+        Ok(CacheResult::Miss)
+    }
+
+    /// Get cached cast statistics by FID (backward compatibility)
+    pub async fn get_cast_stats(&self, fid: i64) -> crate::Result<CacheResult<CastStatsResponse>> {
+        self.get_cast_stats_with_range(fid, None).await
+    }
+
+    /// Cache a cast statistics response (with optional date range)
+    /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
+    pub async fn set_cast_stats_with_range(
+        &self,
+        fid: i64,
+        date_range: Option<&str>,
+        stats: &CastStatsResponse,
+    ) -> crate::Result<()> {
+        // Create cache key with date range if specified
+        let cache_key = if let Some(range) = date_range {
+            format!("cache:cast_stats:{}:{}", fid, range)
+        } else {
+            self.cache_key("cast_stats", fid)
+        };
+        let timestamp_key = if let Some(range) = date_range {
+            format!("cache:cast_stats:{}:{}:timestamp", fid, range)
+        } else {
+            self.timestamp_key("cast_stats", fid)
+        };
+
+        let json_data = serde_json::to_string(stats).map_err(|e| {
+            crate::SnapRagError::Custom(format!("Failed to serialize cast stats: {e}"))
+        })?;
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+
+        // Set cache permanently (no TTL) - data will only be updated, never deleted
+        self.redis.set_json(&cache_key, &json_data).await?;
+        self.redis.set_json(&timestamp_key, &timestamp).await?;
+
+        debug!(
+            "Cached cast statistics for FID {} (range: {:?}, permanent storage)",
+            fid, date_range
+        );
         Ok(())
+    }
+
+    /// Cache a cast statistics response (backward compatibility)
+    pub async fn set_cast_stats(&self, fid: i64, stats: &CastStatsResponse) -> crate::Result<()> {
+        self.set_cast_stats_with_range(fid, None, stats).await
+    }
+
+    /// Invalidate (delete) cached cast statistics for a FID
+    pub async fn invalidate_cast_stats(&self, fid: i64) -> crate::Result<()> {
+        let cache_key = self.cache_key("cast_stats", fid);
+        let timestamp_key = self.timestamp_key("cast_stats", fid);
+
+        self.redis.delete(&cache_key).await?;
+        self.redis.delete(&timestamp_key).await?;
+        info!("Deleted cast stats cache for FID {}", fid);
+        Ok(())
+    }
+
+    /// Invalidate (delete) all caches for a FID
+    pub async fn invalidate_user(&self, fid: i64) -> crate::Result<()> {
+        self.invalidate_profile(fid).await?;
+        self.invalidate_social(fid).await?;
+        self.invalidate_mbti(fid).await?;
+        self.invalidate_cast_stats(fid).await?;
+        info!("Deleted all caches for FID {}", fid);
+        Ok(())
+    }
+
+    /// Delete all cache entries (profile, social, mbti)
+    pub async fn invalidate_all(&self) -> crate::Result<u64> {
+        let mut total_deleted = 0u64;
+
+        // Delete all cache keys matching patterns
+        let patterns = [
+            "cache:profile:*",
+            "cache:social:*",
+            "cache:mbti:*",
+            "cache:cast_stats:*",
+            "cache:*:timestamp",
+            "GET:/api/*",
+        ];
+
+        for pattern in &patterns {
+            let deleted = self.redis.delete_pattern(pattern).await?;
+            total_deleted += deleted;
+            info!("Deleted {} keys matching pattern: {}", deleted, pattern);
+        }
+
+        info!("Deleted total {} cache entries", total_deleted);
+        Ok(total_deleted)
     }
 
     /// Get cache statistics

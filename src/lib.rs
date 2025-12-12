@@ -153,6 +153,7 @@ pub mod personality;
 pub mod rag;
 pub mod social_graph;
 pub mod sync;
+pub mod text_analysis;
 
 // Unit test modules integrated into main lib tests
 // See src/tests/unit_tests.rs for comprehensive unit tests
@@ -239,6 +240,7 @@ pub struct SnapRag {
     database: Arc<Database>,
     sync_service: Option<Arc<SyncService>>,
     lazy_loader: Option<Arc<LazyLoader>>,
+    cache_service: Option<Arc<crate::api::cache::CacheService>>,
 }
 
 impl SnapRag {
@@ -248,11 +250,33 @@ impl SnapRag {
     /// Returns error if database connection fails or configuration is invalid
     pub async fn new(config: &AppConfig) -> Result<Self> {
         let database = Arc::new(Database::from_config(config).await?);
+
+        // Initialize cache service if Redis is configured
+        let cache_service = if let Some(redis_cfg) = &config.redis {
+            let redis = Arc::new(crate::api::redis_client::RedisClient::connect(redis_cfg)?);
+            Some(Arc::new(crate::api::cache::CacheService::with_config(
+                redis,
+                crate::api::cache::CacheConfig {
+                    profile_ttl: std::time::Duration::from_secs(config.cache.profile_ttl_secs),
+                    social_ttl: std::time::Duration::from_secs(config.cache.social_ttl_secs),
+                    mbti_ttl: std::time::Duration::from_secs(7200), // 2 hours for MBTI
+                    cast_stats_ttl: std::time::Duration::from_secs(
+                        config.cache.cast_stats_ttl_secs,
+                    ),
+                    stale_threshold: std::time::Duration::from_secs(redis_cfg.stale_threshold_secs),
+                    enable_stats: config.cache.enable_stats,
+                },
+            )))
+        } else {
+            None
+        };
+
         Ok(Self {
             config: config.clone(),
             database,
             sync_service: None,
             lazy_loader: None,
+            cache_service,
         })
     }
 
@@ -268,11 +292,32 @@ impl SnapRag {
             snapchain_client,
         )));
 
+        // Initialize cache service if Redis is configured
+        let cache_service = if let Some(redis_cfg) = &config.redis {
+            let redis = Arc::new(crate::api::redis_client::RedisClient::connect(redis_cfg)?);
+            Some(Arc::new(crate::api::cache::CacheService::with_config(
+                redis,
+                crate::api::cache::CacheConfig {
+                    profile_ttl: std::time::Duration::from_secs(config.cache.profile_ttl_secs),
+                    social_ttl: std::time::Duration::from_secs(config.cache.social_ttl_secs),
+                    mbti_ttl: std::time::Duration::from_secs(7200), // 2 hours for MBTI
+                    cast_stats_ttl: std::time::Duration::from_secs(
+                        config.cache.cast_stats_ttl_secs,
+                    ),
+                    stale_threshold: std::time::Duration::from_secs(redis_cfg.stale_threshold_secs),
+                    enable_stats: config.cache.enable_stats,
+                },
+            )))
+        } else {
+            None
+        };
+
         Ok(Self {
             config: config.clone(),
             database,
             sync_service: None,
             lazy_loader,
+            cache_service,
         })
     }
 

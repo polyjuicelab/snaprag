@@ -55,6 +55,8 @@ async fn handle_index_unset(snaprag: &SnapRag, force: bool) -> Result<()> {
         // Casts - basic indexes
         "idx_casts_fid",
         "idx_casts_timestamp",
+        // Casts - mentions partial index
+        "idx_casts_mentions_fid",
         // Casts - optimization indexes
         "idx_casts_text_hash",
         "idx_casts_message_hash_desc",
@@ -89,10 +91,16 @@ async fn handle_index_unset(snaprag: &SnapRag, force: bool) -> Result<()> {
         "idx_profile_snapshots_fid_timestamp",
         // Username proofs - pg_trgm indexes
         "idx_username_proofs_username_trgm",
-        // Links
+        // Links - basic indexes
         "idx_links_source_fid",
         "idx_links_target_fid",
         "idx_links_timestamp",
+        // Links - composite indexes for Social API optimization
+        "idx_links_fid_type_timestamp",
+        "idx_links_target_fid_type_timestamp",
+        // Links - filtered indexes for event type
+        "idx_links_fid_type_event_add",
+        "idx_links_target_fid_type_event_add",
         // Reactions
         "idx_reactions_fid",
         "idx_reactions_target_cast_hash",
@@ -190,6 +198,8 @@ async fn handle_index_set(snaprag: &SnapRag, force: bool) -> Result<()> {
         // Casts - basic indexes
         ("idx_casts_fid", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_casts_fid ON casts(fid)"),
         ("idx_casts_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_casts_timestamp ON casts(timestamp DESC)"),
+        // Casts - mentions partial index for Social API optimization (high priority)
+        ("idx_casts_mentions_fid", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_casts_mentions_fid ON casts(fid, timestamp DESC) WHERE mentions IS NOT NULL"),
         // Casts - optimization indexes
         ("idx_casts_text_hash", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_casts_text_hash ON casts(message_hash) WHERE text IS NOT NULL AND length(text) > 0"),
         ("idx_casts_message_hash_desc", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_casts_message_hash_desc ON casts(message_hash DESC) WHERE text IS NOT NULL AND length(text) > 0"),
@@ -224,10 +234,16 @@ async fn handle_index_set(snaprag: &SnapRag, force: bool) -> Result<()> {
         ("idx_profile_snapshots_fid_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profile_snapshots_fid_timestamp ON user_profile_snapshots(fid, snapshot_timestamp DESC)"),
         // Username proofs - pg_trgm indexes
         ("idx_username_proofs_username_trgm", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_username_proofs_username_trgm ON username_proofs USING gin(username gin_trgm_ops) WHERE username IS NOT NULL AND length(username) > 0"),
-        // Links
+        // Links - basic indexes
         ("idx_links_source_fid", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_source_fid ON links(fid)"),
         ("idx_links_target_fid", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_target_fid ON links(target_fid)"),
         ("idx_links_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_timestamp ON links(timestamp DESC)"),
+        // Links - composite indexes for Social API optimization (high priority)
+        ("idx_links_fid_type_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_fid_type_timestamp ON links(fid, link_type, timestamp DESC)"),
+        ("idx_links_target_fid_type_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_target_fid_type_timestamp ON links(target_fid, link_type, timestamp DESC)"),
+        // Links - filtered indexes for event type (medium priority)
+        ("idx_links_fid_type_event_add", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_fid_type_event_add ON links(fid, link_type, timestamp DESC) WHERE event_type = 'add'"),
+        ("idx_links_target_fid_type_event_add", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_target_fid_type_event_add ON links(target_fid, link_type, timestamp DESC) WHERE event_type = 'add'"),
         // Reactions
         ("idx_reactions_fid", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reactions_fid ON reactions(fid)"),
         ("idx_reactions_target_cast_hash", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reactions_target_cast_hash ON reactions(target_cast_hash)"),
@@ -343,6 +359,8 @@ async fn handle_index_status(snaprag: &SnapRag) -> Result<()> {
         // Casts - basic indexes
         "idx_casts_fid",
         "idx_casts_timestamp",
+        // Casts - mentions partial index
+        "idx_casts_mentions_fid",
         // Casts - optimization indexes
         "idx_casts_text_hash",
         "idx_casts_message_hash_desc",
@@ -375,10 +393,16 @@ async fn handle_index_status(snaprag: &SnapRag) -> Result<()> {
         "idx_profile_snapshots_fid_timestamp",
         // Username proofs - pg_trgm indexes
         "idx_username_proofs_username_trgm",
-        // Links
+        // Links - basic indexes
         "idx_links_source_fid",
         "idx_links_target_fid",
         "idx_links_timestamp",
+        // Links - composite indexes for Social API optimization
+        "idx_links_fid_type_timestamp",
+        "idx_links_target_fid_type_timestamp",
+        // Links - filtered indexes for event type
+        "idx_links_fid_type_event_add",
+        "idx_links_target_fid_type_event_add",
         // Reactions
         "idx_reactions_fid",
         "idx_reactions_target_cast_hash",
