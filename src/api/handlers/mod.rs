@@ -29,26 +29,40 @@ use crate::rag::Retriever;
 use crate::social_graph::SocialGraphAnalyzer;
 
 // Re-export sub-modules
+pub mod annual_report;
 pub mod cast_stats;
 pub mod chat;
+pub mod content_style;
+pub mod domains;
+pub mod engagement;
+pub mod follower_growth;
 pub mod job_helpers;
 pub mod mbti;
 pub mod metrics;
+pub mod network_stats;
 pub mod profile;
 pub mod rag;
 pub mod search;
 pub mod stats;
+pub mod temporal_activity;
 
 // Re-export handlers
+pub use annual_report::*;
 pub use cast_stats::*;
 pub use chat::*;
+pub use content_style::*;
+pub use domains::*;
+pub use engagement::*;
+pub use follower_growth::*;
 pub use job_helpers::*;
 pub use mbti::*;
 pub use metrics::*;
+pub use network_stats::*;
 pub use profile::*;
 pub use rag::*;
 pub use search::*;
 pub use stats::*;
+pub use temporal_activity::*;
 
 /// Shared application state
 #[derive(Clone)]

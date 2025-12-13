@@ -101,6 +101,11 @@ async fn handle_index_unset(snaprag: &SnapRag, force: bool) -> Result<()> {
         // Links - filtered indexes for event type
         "idx_links_fid_type_event_add",
         "idx_links_target_fid_type_event_add",
+        // Annual Report API indexes
+        "idx_casts_fid_timestamp",
+        "idx_casts_parent_hash_timestamp",
+        "idx_reactions_target_cast_timestamp_type",
+        "idx_frame_actions_fid_timestamp",
         // Reactions
         "idx_reactions_fid",
         "idx_reactions_target_cast_hash",
@@ -239,11 +244,17 @@ async fn handle_index_set(snaprag: &SnapRag, force: bool) -> Result<()> {
         ("idx_links_target_fid", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_target_fid ON links(target_fid)"),
         ("idx_links_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_timestamp ON links(timestamp DESC)"),
         // Links - composite indexes for Social API optimization (high priority)
-        ("idx_links_fid_type_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_fid_type_timestamp ON links(fid, link_type, timestamp DESC)"),
-        ("idx_links_target_fid_type_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_target_fid_type_timestamp ON links(target_fid, link_type, timestamp DESC)"),
+        // Note: These are optimized with WHERE clause for better performance
+        ("idx_links_fid_type_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_fid_type_timestamp ON links(fid, link_type, timestamp DESC) WHERE link_type = 'follow'"),
+        ("idx_links_target_fid_type_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_target_fid_type_timestamp ON links(target_fid, link_type, timestamp DESC) WHERE link_type = 'follow'"),
         // Links - filtered indexes for event type (medium priority)
         ("idx_links_fid_type_event_add", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_fid_type_event_add ON links(fid, link_type, timestamp DESC) WHERE event_type = 'add'"),
         ("idx_links_target_fid_type_event_add", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_links_target_fid_type_event_add ON links(target_fid, link_type, timestamp DESC) WHERE event_type = 'add'"),
+        // Annual Report API indexes (high priority for query performance)
+        ("idx_casts_fid_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_casts_fid_timestamp ON casts(fid, timestamp DESC) WHERE text IS NOT NULL AND text != ''"),
+        ("idx_casts_parent_hash_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_casts_parent_hash_timestamp ON casts(parent_hash, timestamp DESC) WHERE parent_hash IS NOT NULL"),
+        ("idx_reactions_target_cast_timestamp_type", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reactions_target_cast_timestamp_type ON reactions(target_cast_hash, timestamp, reaction_type, event_type) WHERE event_type = 'add'"),
+        ("idx_frame_actions_fid_timestamp", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_frame_actions_fid_timestamp ON frame_actions(fid, timestamp DESC)"),
         // Reactions
         ("idx_reactions_fid", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reactions_fid ON reactions(fid)"),
         ("idx_reactions_target_cast_hash", "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reactions_target_cast_hash ON reactions(target_cast_hash)"),
@@ -403,6 +414,11 @@ async fn handle_index_status(snaprag: &SnapRag) -> Result<()> {
         // Links - filtered indexes for event type
         "idx_links_fid_type_event_add",
         "idx_links_target_fid_type_event_add",
+        // Annual Report API indexes
+        "idx_casts_fid_timestamp",
+        "idx_casts_parent_hash_timestamp",
+        "idx_reactions_target_cast_timestamp_type",
+        "idx_frame_actions_fid_timestamp",
         // Reactions
         "idx_reactions_fid",
         "idx_reactions_target_cast_hash",
