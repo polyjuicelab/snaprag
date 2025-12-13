@@ -92,7 +92,8 @@ async fn test_temporal_activity_endpoint_structure() {
 
 #[tokio::test]
 async fn test_emoji_extraction() {
-    use snaprag::utils::emoji::{count_emoji_frequencies, extract_emojis};
+    use snaprag::utils::emoji::count_emoji_frequencies;
+    use snaprag::utils::emoji::extract_emojis;
 
     let text = "Hello 🔥 world 💎 and 🚀";
     let emojis = extract_emojis(text);
@@ -115,4 +116,3 @@ async fn test_emoji_no_emojis() {
     let emojis = extract_emojis(text);
     assert_eq!(emojis.len(), 0);
 }
-
