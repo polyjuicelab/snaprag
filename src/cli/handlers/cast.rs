@@ -94,11 +94,8 @@ pub async fn handle_cast_search(
 
         if detailed {
             println!("   Hash: {}", hex::encode(&result.message_hash));
-            if result.parent_hash.is_some() {
-                println!(
-                    "   (Reply to: {})",
-                    hex::encode(result.parent_hash.as_ref().unwrap())
-                );
+            if let Some(parent_hash) = &result.parent_hash {
+                println!("   (Reply to: {})", hex::encode(parent_hash));
             }
         }
         println!();
