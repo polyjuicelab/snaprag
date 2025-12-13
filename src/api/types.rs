@@ -302,3 +302,194 @@ pub struct DateRange {
     pub start: String, // ISO 8601 format
     pub end: String,   // ISO 8601 format
 }
+
+/// Engagement metrics request (query parameters)
+#[derive(Debug, Deserialize)]
+pub struct EngagementRequest {
+    /// Start timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub start_timestamp: Option<i64>,
+    /// End timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub end_timestamp: Option<i64>,
+}
+
+/// Popular cast with engagement metrics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PopularCast {
+    pub message_hash: String, // hex-encoded
+    pub text: Option<String>,
+    pub reactions: i64,
+    pub recasts: i64,
+    pub replies: i64,
+    pub timestamp: i64,
+}
+
+/// Top interactive user
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopInteractiveUser {
+    pub fid: i64,
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub interaction_count: i64,
+}
+
+/// Engagement metrics response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngagementResponse {
+    pub reactions_received: i64,
+    pub recasts_received: i64,
+    pub replies_received: i64,
+    pub total_engagement: i64,
+    pub most_popular_cast: Option<PopularCast>,
+    pub top_reactors: Vec<TopInteractiveUser>,
+}
+
+/// Temporal activity request (query parameters)
+#[derive(Debug, Deserialize)]
+pub struct TemporalActivityRequest {
+    /// Start timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub start_timestamp: Option<i64>,
+    /// End timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub end_timestamp: Option<i64>,
+}
+
+/// Hour count entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HourCount {
+    pub hour: i32, // 0-23
+    pub count: i64,
+}
+
+/// Month count entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonthCount {
+    pub month: String, // "YYYY-MM"
+    pub count: i64,
+}
+
+/// Cast summary for temporal activity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CastSummary {
+    pub message_hash: String, // hex-encoded
+    pub text: Option<String>,
+    pub timestamp: i64,
+}
+
+/// Temporal activity response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemporalActivityResponse {
+    pub hourly_distribution: Vec<HourCount>,
+    pub monthly_distribution: Vec<MonthCount>,
+    pub most_active_hour: Option<i32>,
+    pub most_active_month: Option<String>,
+    pub first_cast: Option<CastSummary>,
+    pub last_cast: Option<CastSummary>,
+}
+
+/// Content style request (query parameters)
+#[derive(Debug, Deserialize)]
+pub struct ContentStyleRequest {
+    /// Start timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub start_timestamp: Option<i64>,
+    /// End timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub end_timestamp: Option<i64>,
+}
+
+/// Emoji frequency entry
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmojiFrequency {
+    pub emoji: String,
+    pub count: i64,
+}
+
+/// Content style response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentStyleResponse {
+    pub top_emojis: Vec<EmojiFrequency>,
+    pub avg_cast_length: f64,
+    pub total_characters: i64,
+    pub frames_used: i64,
+    pub frames_created: i64,   // Always 0 for now - not tracked
+    pub channels_created: i64, // Always 0 for now - not tracked
+}
+
+/// Follower growth request (query parameters)
+#[derive(Debug, Deserialize)]
+pub struct FollowerGrowthRequest {
+    /// Start timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub start_timestamp: Option<i64>,
+    /// End timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub end_timestamp: Option<i64>,
+}
+
+/// Monthly follower snapshot
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonthlyFollowerSnapshot {
+    pub month: String, // "YYYY-MM"
+    pub followers: i64,
+    pub following: i64,
+}
+
+/// Follower growth response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FollowerGrowthResponse {
+    pub current_followers: i64,
+    pub current_following: i64,
+    pub followers_at_start: i64,
+    pub following_at_start: i64,
+    pub net_growth: i64,
+    pub monthly_snapshots: Vec<MonthlyFollowerSnapshot>,
+}
+
+/// Network averages request (query parameters)
+#[derive(Debug, Deserialize)]
+pub struct NetworkAveragesRequest {
+    /// Start timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub start_timestamp: Option<i64>,
+    /// End timestamp (Unix timestamp in seconds)
+    #[serde(default)]
+    pub end_timestamp: Option<i64>,
+}
+
+/// Percentiles for comparison
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Percentiles {
+    pub p50: i64,
+    pub p75: i64,
+    pub p90: i64,
+}
+
+/// Network averages response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkAveragesResponse {
+    pub avg_casts_per_user: f64,
+    pub avg_reactions_per_user: f64,
+    pub avg_followers_per_user: f64,
+    pub total_active_users: i64,
+    pub percentiles: PercentilesResponse,
+}
+
+/// Percentiles response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PercentilesResponse {
+    pub casts: Percentiles,
+    pub reactions: Percentiles, // Placeholder - can be implemented later
+}
+
+/// Domain/username status response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainStatusResponse {
+    pub has_ens: bool,
+    pub ens_name: Option<String>,
+    pub has_farcaster_name: bool,
+    pub farcaster_name: Option<String>,
+    pub username_type: Option<String>, // "fname" or "ens"
+}

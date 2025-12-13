@@ -63,9 +63,14 @@ use crate::SnapRagError;
 
 // Re-export submodules
 mod casts;
+mod content_style;
+mod engagement;
+mod follower_growth;
 mod links;
+mod network_stats;
 mod schema;
 mod sync;
+mod temporal;
 mod user_activity;
 mod user_data;
 mod user_data_changes;
