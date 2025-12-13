@@ -107,6 +107,7 @@ local/
 # All markdown files except essential docs
 *.md
 !README.md
+!API.md
 
 # All bash scripts (temporary helper scripts)
 *.sh
