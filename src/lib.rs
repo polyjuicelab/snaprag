@@ -154,6 +154,7 @@ pub mod rag;
 pub mod social_graph;
 pub mod sync;
 pub mod text_analysis;
+pub mod utils;
 
 // Unit test modules integrated into main lib tests
 // See src/tests/unit_tests.rs for comprehensive unit tests
