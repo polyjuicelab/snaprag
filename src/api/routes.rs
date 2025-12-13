@@ -54,6 +54,35 @@ pub fn api_routes(state: AppState) -> Router {
         .route("/stats", get(handlers::get_stats))
         // Cast statistics
         .route("/casts/stats/:fid", get(handlers::get_cast_stats))
+        // User engagement metrics
+        .route("/users/:fid/engagement", get(handlers::get_engagement))
+        // User temporal activity
+        .route(
+            "/users/:fid/activity/temporal",
+            get(handlers::get_temporal_activity),
+        )
+        // User content style
+        .route(
+            "/users/:fid/content/style",
+            get(handlers::get_content_style),
+        )
+        // User follower growth
+        .route(
+            "/users/:fid/followers/growth",
+            get(handlers::get_follower_growth),
+        )
+        // User domain/username status
+        .route("/users/:fid/domains", get(handlers::get_domains))
+        // Annual report
+        .route(
+            "/users/:fid/annual-report/:year",
+            get(handlers::get_annual_report),
+        )
+        // Network statistics
+        .route(
+            "/stats/network/averages",
+            get(handlers::get_network_averages),
+        )
         // Prometheus metrics
         .route("/metrics", get(handlers::get_metrics))
         // Social graph endpoints
