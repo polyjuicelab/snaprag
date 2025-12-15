@@ -14,6 +14,8 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use crate::api::auth::auth_middleware;
+use crate::api::auth::AuthState;
 use crate::api::cache::CacheService;
 use crate::api::handlers::AppState;
 use crate::api::mcp;
@@ -143,9 +145,37 @@ pub async fn serve_api(
         cache_service,
     };
 
+    // Initialize authentication state
+    let auth_state = AuthState::new(&config.auth);
+    if auth_state.is_enabled() {
+        info!("🔐 Authentication enabled");
+        info!("  Configured tokens: {}", config.auth.tokens.len());
+    } else {
+        info!("💡 Authentication disabled");
+    }
+
     // Build API routes
     let api_router = routes::api_routes(state.clone());
     let mcp_router = mcp::mcp_routes(state.clone());
+
+    // Apply authentication middleware if enabled
+    let api_router = if auth_state.is_enabled() {
+        api_router.layer(axum::middleware::from_fn_with_state(
+            auth_state.clone(),
+            auth_middleware,
+        ))
+    } else {
+        api_router
+    };
+
+    let mcp_router = if auth_state.is_enabled() {
+        mcp_router.layer(axum::middleware::from_fn_with_state(
+            auth_state.clone(),
+            auth_middleware,
+        ))
+    } else {
+        mcp_router
+    };
 
     // Combine routes with optional payment middleware
     let mut app;
