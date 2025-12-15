@@ -208,14 +208,12 @@ impl Database {
                 .and_then(|d| d.with_day(1))
                 .and_then(|d| d.with_month(month + 1))
                 .and_then(|d| d.pred_opt())
-                .map(|d| d.day())
-                .unwrap_or(28);
+                .map_or(28, |d| d.day());
 
             let month_end = chrono::NaiveDate::from_ymd_opt(year, month, last_day)
                 .and_then(|d| d.and_hms_opt(23, 59, 59))
                 .and_then(|d| d.and_local_timezone(chrono::Utc).single())
-                .map(|dt| dt.timestamp())
-                .unwrap_or(unix_ts);
+                .map_or(unix_ts, |dt| dt.timestamp());
 
             #[allow(clippy::cast_sign_loss)]
             let month_end_farcaster = crate::unix_to_farcaster_timestamp(month_end as u64) as i64;
@@ -230,7 +228,7 @@ impl Database {
                 .await
                 .unwrap_or(0);
 
-            let month_str = format!("{:04}-{:02}", year, month);
+            let month_str = format!("{year:04}-{month:02}");
             snapshots.push(MonthlyFollowerSnapshot {
                 month: month_str,
                 followers,
@@ -243,16 +241,14 @@ impl Database {
                     chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1)
                         .and_then(|d| d.and_hms_opt(0, 0, 0))
                         .and_then(|d| d.and_local_timezone(chrono::Utc).single())
-                        .map(|dt| dt.timestamp() as u64)
-                        .unwrap_or(current as u64),
+                        .map_or(current as u64, |dt| dt.timestamp() as u64),
                 ) as i64;
             } else {
                 current = crate::unix_to_farcaster_timestamp(
                     chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)
                         .and_then(|d| d.and_hms_opt(0, 0, 0))
                         .and_then(|d| d.and_local_timezone(chrono::Utc).single())
-                        .map(|dt| dt.timestamp() as u64)
-                        .unwrap_or(current as u64),
+                        .map_or(current as u64, |dt| dt.timestamp() as u64),
                 ) as i64;
             }
         }

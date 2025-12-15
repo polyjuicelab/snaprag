@@ -329,12 +329,12 @@ impl CacheService {
     ) -> crate::Result<CacheResult<CastStatsResponse>> {
         // Create cache key with date range if specified
         let cache_key = if let Some(range) = date_range {
-            format!("cache:cast_stats:{}:{}", fid, range)
+            format!("cache:cast_stats:{fid}:{range}")
         } else {
             self.cache_key("cast_stats", fid)
         };
         let timestamp_key = if let Some(range) = date_range {
-            format!("cache:cast_stats:{}:{}:timestamp", fid, range)
+            format!("cache:cast_stats:{fid}:{range}:timestamp")
         } else {
             self.timestamp_key("cast_stats", fid)
         };
@@ -383,12 +383,12 @@ impl CacheService {
     ) -> crate::Result<()> {
         // Create cache key with date range if specified
         let cache_key = if let Some(range) = date_range {
-            format!("cache:cast_stats:{}:{}", fid, range)
+            format!("cache:cast_stats:{fid}:{range}")
         } else {
             self.cache_key("cast_stats", fid)
         };
         let timestamp_key = if let Some(range) = date_range {
-            format!("cache:cast_stats:{}:{}:timestamp", fid, range)
+            format!("cache:cast_stats:{fid}:{range}:timestamp")
         } else {
             self.timestamp_key("cast_stats", fid)
         };
@@ -470,7 +470,8 @@ impl CacheService {
     }
 
     /// Get cache information (simplified for Redis)
-    pub fn get_cache_info(&self) -> CacheInfo {
+    #[must_use]
+    pub const fn get_cache_info(&self) -> CacheInfo {
         // Redis doesn't provide easy entry counts, so we return empty info
         CacheInfo { total_entries: 0 }
     }
@@ -507,7 +508,7 @@ pub struct CacheInfo {
 
 impl CacheInfo {
     #[must_use]
-    pub fn usage_percentage(&self) -> f64 {
+    pub const fn usage_percentage(&self) -> f64 {
         0.0 // Redis doesn't have a fixed max, so we return 0
     }
 }

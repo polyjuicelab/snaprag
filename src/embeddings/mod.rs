@@ -181,9 +181,7 @@ impl EmbeddingConfig {
     #[must_use]
     pub fn from_app_config(config: &crate::config::AppConfig) -> Self {
         // Try embeddings config first, fall back to LLM config for backward compatibility
-        if !config.embedding_endpoint().is_empty() {
-            Self::from_embeddings_config(config)
-        } else {
+        if config.embedding_endpoint().is_empty() {
             // Fallback: use LLM endpoint for backward compatibility
             let provider = if config.llm_key() == "ollama" {
                 EmbeddingProvider::Ollama
@@ -204,6 +202,8 @@ impl EmbeddingConfig {
                     None
                 },
             }
+        } else {
+            Self::from_embeddings_config(config)
         }
     }
 
@@ -230,7 +230,9 @@ impl EmbeddingConfig {
             model: config.embedding_model().to_string(),
             dimension: config.embedding_dimension(),
             endpoint: config.embedding_endpoint().to_string(),
-            api_key: config.embedding_api_key().map(|s| s.to_string()),
+            api_key: config
+                .embedding_api_key()
+                .map(std::string::ToString::to_string),
         }
     }
 }
