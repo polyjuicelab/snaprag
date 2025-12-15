@@ -216,7 +216,7 @@ impl Database {
         min_duration_secs: i64,
     ) -> Result<Vec<(i32, i64, String, String, Option<String>, Option<String>)>> {
         let rows = sqlx::query_as::<_, (i32, i64, String, String, Option<String>, Option<String>)>(
-            r#"
+            r"
             SELECT 
                 pid,
                 EXTRACT(EPOCH FROM (NOW() - query_start))::bigint as duration_secs,
@@ -233,7 +233,7 @@ impl Database {
                 AND query NOT LIKE '%pg_stat_activity%'
                 AND EXTRACT(EPOCH FROM (NOW() - query_start)) > $1
             ORDER BY query_start ASC
-            "#,
+            ",
         )
         .bind(min_duration_secs)
         .fetch_all(&self.pool)

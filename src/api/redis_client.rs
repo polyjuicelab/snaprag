@@ -178,7 +178,7 @@ impl RedisClient {
             return Ok(None); // Job already exists
         }
 
-        let queue_key = self.key(&format!("queue:{}", queue));
+        let queue_key = self.key(&format!("queue:{queue}"));
         let mut conn = self
             .client
             .get_multiplexed_tokio_connection()
@@ -213,7 +213,7 @@ impl RedisClient {
         queue: &str,
         timeout: Duration,
     ) -> crate::Result<Option<(String, String)>> {
-        let queue_key = self.key(&format!("queue:{}", queue));
+        let queue_key = self.key(&format!("queue:{queue}"));
         let mut conn = self
             .client
             .get_multiplexed_tokio_connection()
@@ -268,7 +268,7 @@ impl RedisClient {
         // Build queue keys
         let queue_keys: Vec<String> = queues
             .iter()
-            .map(|q| self.key(&format!("queue:{}", q)))
+            .map(|q| self.key(&format!("queue:{q}")))
             .collect();
 
         // Use BRPOP to pop from multiple queues at once
@@ -327,7 +327,7 @@ impl RedisClient {
         status: &str,
         result: Option<&str>,
     ) -> crate::Result<()> {
-        let status_key = self.key(&format!("job_status:{}", job_id));
+        let status_key = self.key(&format!("job_status:{job_id}"));
         let mut conn = self
             .client
             .get_multiplexed_tokio_connection()
@@ -335,7 +335,7 @@ impl RedisClient {
             .map_err(|e| crate::SnapRagError::Custom(format!("Redis connect error: {e}")))?;
 
         let status_data = if let Some(result_data) = result {
-            format!("{}|{}", status, result_data)
+            format!("{status}|{result_data}")
         } else {
             status.to_string()
         };
@@ -356,7 +356,7 @@ impl RedisClient {
         &self,
         job_id: &str,
     ) -> crate::Result<Option<(String, Option<String>)>> {
-        let status_key = self.key(&format!("job_status:{}", job_id));
+        let status_key = self.key(&format!("job_status:{job_id}"));
         let mut conn = self
             .client
             .get_multiplexed_tokio_connection()
@@ -371,7 +371,7 @@ impl RedisClient {
         if let Some(data) = status_data {
             let parts: Vec<&str> = data.splitn(2, '|').collect();
             let status = parts[0].to_string();
-            let result = parts.get(1).map(|s| s.to_string());
+            let result = parts.get(1).map(|s| (*s).to_string());
             Ok(Some((status, result)))
         } else {
             Ok(None)
@@ -405,7 +405,7 @@ impl RedisClient {
 
                 // If status is "processing", check if it's been stuck for too long
                 if status == "processing" {
-                    let status_key = self.key(&format!("job_status:{}", job_key));
+                    let status_key = self.key(&format!("job_status:{job_key}"));
                     let ttl: i64 = conn.ttl(&status_key).await.map_err(|e| {
                         crate::SnapRagError::Custom(format!("Redis TTL error: {e}"))
                     })?;
@@ -440,7 +440,7 @@ impl RedisClient {
                 // Job is in active_jobs but has no status - might be orphaned, check if it's in queue
                 // Extract queue name from job_key (format: "type:fid")
                 if let Some((job_type, _)) = job_key.split_once(':') {
-                    let queue_key = self.key(&format!("queue:{}", job_type));
+                    let queue_key = self.key(&format!("queue:{job_type}"));
                     // Check queue length - if queue is empty or very small, job might be stuck
                     let queue_len: i64 = conn.llen(&queue_key).await.map_err(|e| {
                         crate::SnapRagError::Custom(format!("Redis LLEN error: {e}"))
@@ -553,7 +553,7 @@ impl RedisClient {
                 if status == "pending" {
                     // Check if the job is actually in the queue
                     if let Some((job_type, _)) = job_key.split_once(':') {
-                        let queue_key = self.key(&format!("queue:{}", job_type));
+                        let queue_key = self.key(&format!("queue:{job_type}"));
                         let queue_len: Result<i64, _> = conn.llen(&queue_key).await;
                         if let Ok(queue_len) = queue_len {
                             // If queue is empty or doesn't contain this job, it's orphaned
@@ -569,7 +569,7 @@ impl RedisClient {
                             // For queues with items, we can't easily check if this specific job is in the queue
                             // without scanning, so we'll clean it up if it's been pending for too long
                             // Check the status key TTL to estimate how long it's been pending
-                            let status_key = self.key(&format!("job_status:{}", job_key));
+                            let status_key = self.key(&format!("job_status:{job_key}"));
                             let ttl: Result<i64, _> = conn.ttl(&status_key).await;
                             if let Ok(ttl) = ttl {
                                 // Status key has 24 hour TTL (86400 seconds)
@@ -591,7 +591,7 @@ impl RedisClient {
 
                 // Clean up stuck processing jobs (> 1 hour)
                 if status == "processing" {
-                    let status_key = self.key(&format!("job_status:{}", job_key));
+                    let status_key = self.key(&format!("job_status:{job_key}"));
                     let ttl: Result<i64, _> = conn.ttl(&status_key).await;
                     if let Ok(ttl) = ttl {
                         // Status key has 24 hour TTL (86400 seconds)
@@ -609,7 +609,7 @@ impl RedisClient {
             } else {
                 // Job has no status - check if it's orphaned
                 if let Some((job_type, _)) = job_key.split_once(':') {
-                    let queue_key = self.key(&format!("queue:{}", job_type));
+                    let queue_key = self.key(&format!("queue:{job_type}"));
                     let queue_len: Result<i64, _> = conn.llen(&queue_key).await;
                     if let Ok(queue_len) = queue_len {
                         // If queue is empty and job has no status, it's likely orphaned
@@ -627,7 +627,9 @@ impl RedisClient {
         }
 
         // Remove all cleaned jobs from active_jobs set
-        if !cleaned_jobs.is_empty() {
+        if cleaned_jobs.is_empty() {
+            warn!("✅ No jobs needed cleanup");
+        } else {
             for job_key in &cleaned_jobs {
                 let _: () = conn
                     .srem(&active_jobs_key, job_key)
@@ -635,8 +637,6 @@ impl RedisClient {
                     .map_err(|e| crate::SnapRagError::Custom(format!("Redis SREM error: {e}")))?;
             }
             warn!("✅ Cleaned up {} old/stuck job(s)", cleaned_count);
-        } else {
-            warn!("✅ No jobs needed cleanup");
         }
 
         Ok(cleaned_count)
@@ -683,16 +683,15 @@ impl RedisClient {
 
                 // Extract queue name and FID from job_key (format: "type:fid")
                 if let Some((job_type, fid_str)) = job_key.split_once(':') {
-                    let fid: i64 = match fid_str.parse() {
-                        Ok(f) => f,
-                        Err(_) => {
-                            warn!("Invalid FID in job_key {}: {}", job_key, fid_str);
-                            continue;
-                        }
+                    let fid: i64 = if let Ok(f) = fid_str.parse() {
+                        f
+                    } else {
+                        warn!("Invalid FID in job_key {}: {}", job_key, fid_str);
+                        continue;
                     };
 
                     // Check if job is already in the queue
-                    let queue_key = self.key(&format!("queue:{}", job_type));
+                    let queue_key = self.key(&format!("queue:{job_type}"));
                     // We can't easily check if a specific job_id is in the queue without scanning,
                     // so we'll just try to re-push and let push_job handle duplicates
 
@@ -777,7 +776,7 @@ impl RedisClient {
             if let Ok(Some((status, result))) = self.get_job_status(&job_key).await {
                 // Calculate processing duration if status is "processing"
                 let processing_duration = if status == "processing" {
-                    let status_key = self.key(&format!("job_status:{}", job_key));
+                    let status_key = self.key(&format!("job_status:{job_key}"));
                     let ttl: Result<i64, _> = conn.ttl(&status_key).await;
                     if let Ok(ttl) = ttl {
                         if ttl > 0 {
