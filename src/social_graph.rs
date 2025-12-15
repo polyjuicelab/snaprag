@@ -751,7 +751,7 @@ impl SocialGraphAnalyzer {
 
         // Use a single query with IN clause (more efficient than multiple queries)
         // Build dynamic SQL with placeholders for each FID
-        let placeholders: Vec<String> = (1..=fids.len()).map(|i| format!("${}", i)).collect();
+        let placeholders: Vec<String> = (1..=fids.len()).map(|i| format!("${i}")).collect();
         let sql = format!(
             r"
             SELECT 
@@ -801,9 +801,8 @@ impl SocialGraphAnalyzer {
         let fids_to_fetch: Vec<i64> = fids.iter().take(limit).copied().collect();
 
         // Batch fetch profiles in a single query
-        let placeholders: Vec<String> = (1..=fids_to_fetch.len())
-            .map(|i| format!("${}", i))
-            .collect();
+        let placeholders: Vec<String> =
+            (1..=fids_to_fetch.len()).map(|i| format!("${i}")).collect();
         let sql = format!(
             r"
             SELECT 
@@ -975,9 +974,8 @@ impl SocialGraphAnalyzer {
         let fids_to_check: Vec<i64> = following.iter().take(sample_size).copied().collect();
 
         // Batch fetch profiles
-        let placeholders: Vec<String> = (1..=fids_to_check.len())
-            .map(|i| format!("${}", i))
-            .collect();
+        let placeholders: Vec<String> =
+            (1..=fids_to_check.len()).map(|i| format!("${i}")).collect();
         let sql = format!(
             r"
             SELECT 
@@ -1007,7 +1005,7 @@ impl SocialGraphAnalyzer {
         for profile in profiles {
             let bio_lower = profile.bio.as_deref().unwrap_or("").to_lowercase();
             let username_lower = profile.username.as_deref().unwrap_or("").to_lowercase();
-            let combined = format!("{} {}", bio_lower, username_lower);
+            let combined = format!("{bio_lower} {username_lower}");
 
             // Quick keyword check
             let has_tech = combined.contains("dev")

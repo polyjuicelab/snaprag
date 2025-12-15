@@ -51,14 +51,13 @@ pub async fn check_or_create_job(state: &AppState, config: &JobConfig) -> JobRes
                         config.job_type, config.fid, status
                     );
                     return JobResult::AlreadyExists(status);
-                } else {
-                    // Job is active but no status found - assume pending
-                    info!(
-                        "⏳ Job already exists for {} FID {} (no status found, assuming pending)",
-                        config.job_type, config.fid
-                    );
-                    return JobResult::AlreadyExists("pending".to_string());
                 }
+                // Job is active but no status found - assume pending
+                info!(
+                    "⏳ Job already exists for {} FID {} (no status found, assuming pending)",
+                    config.job_type, config.fid
+                );
+                return JobResult::AlreadyExists("pending".to_string());
             }
 
             // Create new job

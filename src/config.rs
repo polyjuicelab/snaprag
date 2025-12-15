@@ -279,6 +279,29 @@ const fn default_use_llm() -> bool {
     false
 }
 
+/// Authentication configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AuthConfig {
+    /// Enable authentication middleware
+    #[serde(default = "default_auth_enabled")]
+    pub enabled: bool,
+    /// Time window for timestamp validation in seconds (default: 5 minutes)
+    #[serde(default = "default_auth_time_window")]
+    pub time_window_secs: u64,
+    /// Token name to secret key mapping
+    /// This is a flattened map where each key-value pair represents a token name and its secret
+    #[serde(flatten)]
+    pub tokens: std::collections::HashMap<String, String>,
+}
+
+const fn default_auth_enabled() -> bool {
+    false
+}
+
+const fn default_auth_time_window() -> u64 {
+    300 // 5 minutes
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub database: DatabaseConfig,
@@ -297,6 +320,8 @@ pub struct AppConfig {
     pub cache_server: CacheServerConfig,
     #[serde(default)]
     pub mbti: MbtiConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 impl AppConfig {
@@ -577,6 +602,7 @@ impl Default for AppConfig {
             redis: None, // Redis is optional but recommended for cache and job queue
             cache_server: CacheServerConfig::default(), // Deprecated, kept for backward compatibility
             mbti: MbtiConfig::default(),
+            auth: AuthConfig::default(),
         }
     }
 }
