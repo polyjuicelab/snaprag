@@ -80,7 +80,7 @@ pub async fn get_content_style(
 
     // Calculate average cast length
     let avg_cast_length = if total_casts > 0 {
-        total_characters as f64 / total_casts as f64
+        total_characters as f64 / f64::from(total_casts)
     } else {
         0.0
     };

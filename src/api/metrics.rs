@@ -317,7 +317,7 @@ impl Metrics {
         }
 
         // Get connection pool size
-        self.db_connection_pool_size.set(pool.size() as f64);
+        self.db_connection_pool_size.set(f64::from(pool.size()));
     }
 }
 

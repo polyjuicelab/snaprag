@@ -196,6 +196,9 @@ pub enum Commands {
     /// Cache management commands
     #[command(subcommand)]
     Cache(CacheCommands),
+    /// Authentication token management commands
+    #[command(subcommand)]
+    Auth(AuthCommands),
 }
 
 #[derive(Subcommand)]
@@ -710,4 +713,21 @@ pub enum DataType {
     Follows,
     /// List user data
     UserData,
+}
+
+#[derive(Subcommand)]
+pub enum AuthCommands {
+    /// Generate a new authentication token/secret pair
+    Generate {
+        /// Token name (identifier for this token)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+    /// List all configured authentication tokens
+    List,
+    /// Revoke (delete) an authentication token
+    Revoke {
+        /// Token name to revoke
+        name: String,
+    },
 }
