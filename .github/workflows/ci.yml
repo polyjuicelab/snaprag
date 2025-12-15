@@ -16,7 +16,7 @@ jobs:
     name: Format Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -60,7 +60,7 @@ jobs:
     name: Clippy Lints
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -116,7 +116,7 @@ jobs:
         rust: [stable]
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -211,7 +211,7 @@ jobs:
     name: Build (Minimal Features)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -239,7 +239,7 @@ jobs:
   #   name: Security Audit
   #   runs-on: ubuntu-latest
   #   steps:
-  #     - uses: actions/checkout@v4
+  #     - uses: actions/checkout@v5
   #     
   #     - name: Install Rust toolchain
   #       uses: dtolnay/rust-toolchain@stable
@@ -332,7 +332,7 @@ jobs:
     name: Documentation
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
