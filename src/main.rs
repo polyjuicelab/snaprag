@@ -394,6 +394,17 @@ async fn main() -> Result<()> {
         Commands::Cache(cache_command) => {
             snaprag::cli::handle_cache_command(&snaprag, &cache_command).await?;
         }
+        Commands::Auth(auth_command) => match auth_command {
+            snaprag::cli::AuthCommands::Generate { name } => {
+                snaprag::cli::handle_auth_generate(&config, name)?;
+            }
+            snaprag::cli::AuthCommands::List => {
+                snaprag::cli::handle_auth_list(&config)?;
+            }
+            snaprag::cli::AuthCommands::Revoke { name } => {
+                snaprag::cli::handle_auth_revoke(&config, name)?;
+            }
+        },
         Commands::Fetch(fetch_command) => match fetch_command {
             FetchCommands::User {
                 fid,
