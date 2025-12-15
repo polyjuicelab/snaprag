@@ -50,7 +50,7 @@ async fn handle_cache_clear(snaprag: &SnapRag, force: bool) -> Result<()> {
     println!("🗑️  Clearing all cache entries...");
     let deleted_count = cache_service.invalidate_all().await?;
 
-    println!("✅ Successfully deleted {} cache entries", deleted_count);
+    println!("✅ Successfully deleted {deleted_count} cache entries");
     Ok(())
 }
 
@@ -68,21 +68,21 @@ async fn handle_cache_delete(
         .as_ref()
         .ok_or_else(|| crate::SnapRagError::Custom("Cache service not initialized".to_string()))?;
 
-    println!("🗑️  Deleting cache for FID {}...", fid);
+    println!("🗑️  Deleting cache for FID {fid}...");
 
     if profile_only {
         cache_service.invalidate_profile(fid).await?;
-        println!("✅ Deleted profile cache for FID {}", fid);
+        println!("✅ Deleted profile cache for FID {fid}");
     } else if social_only {
         cache_service.invalidate_social(fid).await?;
-        println!("✅ Deleted social cache for FID {}", fid);
+        println!("✅ Deleted social cache for FID {fid}");
     } else if mbti_only {
         cache_service.invalidate_mbti(fid).await?;
-        println!("✅ Deleted MBTI cache for FID {}", fid);
+        println!("✅ Deleted MBTI cache for FID {fid}");
     } else {
         // Delete all caches for this FID
         cache_service.invalidate_user(fid).await?;
-        println!("✅ Deleted all caches for FID {}", fid);
+        println!("✅ Deleted all caches for FID {fid}");
     }
 
     Ok(())

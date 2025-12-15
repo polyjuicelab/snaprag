@@ -12,7 +12,10 @@ use chrono::Utc;
 use tracing::error;
 use tracing::info;
 
-use super::job_helpers::*;
+use super::job_helpers::check_or_create_job;
+use super::job_helpers::create_job_status_response;
+use super::job_helpers::JobConfig;
+use super::job_helpers::JobResult;
 use super::AppState;
 use crate::api::types::ApiResponse;
 use crate::api::types::CastStatsRequest;
@@ -58,7 +61,7 @@ pub async fn get_cast_stats(
                 // Create cache key based on date range (YYYY-MM-DD format)
                 let start_date = start_dt.format("%Y-%m-%d").to_string();
                 let end_date = end_dt.format("%Y-%m-%d").to_string();
-                let date_range_key = Some(format!("{}:{}", start_date, end_date));
+                let date_range_key = Some(format!("{start_date}:{end_date}"));
 
                 (Some(normalized_start), Some(normalized_end), date_range_key)
             }
@@ -72,7 +75,7 @@ pub async fn get_cast_stats(
 
                 let normalized_start = start_dt.and_utc().timestamp();
                 let start_date = start_dt.format("%Y-%m-%d").to_string();
-                let date_range_key = Some(format!("{}:", start_date));
+                let date_range_key = Some(format!("{start_date}:"));
 
                 (Some(normalized_start), None, date_range_key)
             }
@@ -86,7 +89,7 @@ pub async fn get_cast_stats(
 
                 let normalized_end = end_dt.and_utc().timestamp();
                 let end_date = end_dt.format("%Y-%m-%d").to_string();
-                let date_range_key = Some(format!(":{}", end_date));
+                let date_range_key = Some(format!(":{end_date}"));
 
                 (None, Some(normalized_end), date_range_key)
             }
@@ -107,11 +110,11 @@ pub async fn get_cast_stats(
     if use_cache {
         // Create cache key with date range if specified
         let cache_key_suffix = if let Some(ref date_range) = date_range_key {
-            format!("{}:{}", fid, date_range)
+            format!("{fid}:{date_range}")
         } else {
             fid.to_string()
         };
-        let job_key = format!("cast_stats:{}", cache_key_suffix);
+        let job_key = format!("cast_stats:{cache_key_suffix}");
 
         // Check cache first (with date range support)
         match state

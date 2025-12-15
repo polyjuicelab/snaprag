@@ -1,5 +1,6 @@
 //! API server module for serving read-only services via REST and MCP
 
+pub mod auth;
 pub mod cache;
 pub mod handlers;
 pub mod mcp;

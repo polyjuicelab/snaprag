@@ -26,10 +26,10 @@ pub async fn get_annual_report(
     info!("GET /api/users/{}/annual-report/{}", fid, year);
 
     // Calculate time range for the year
-    let year_start = DateTime::parse_from_rfc3339(&format!("{}-01-01T00:00:00Z", year))
+    let year_start = DateTime::parse_from_rfc3339(&format!("{year}-01-01T00:00:00Z"))
         .map_err(|_| StatusCode::BAD_REQUEST)?
         .timestamp();
-    let year_end = DateTime::parse_from_rfc3339(&format!("{}-12-31T23:59:59Z", year))
+    let year_end = DateTime::parse_from_rfc3339(&format!("{year}-12-31T23:59:59Z"))
         .map_err(|_| StatusCode::BAD_REQUEST)?
         .timestamp();
 
@@ -149,7 +149,7 @@ pub async fn get_annual_report(
     let mut has_farcaster_name = false;
     let mut farcaster_name = None;
     for proof in proofs {
-        let username_type = crate::models::UsernameType::from(proof.username_type as i32);
+        let username_type = crate::models::UsernameType::from(i32::from(proof.username_type));
         match username_type {
             crate::models::UsernameType::EnsL1 => {
                 has_ens = true;

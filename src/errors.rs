@@ -21,6 +21,8 @@ pub enum SnapRagError {
     Serialization(#[from] serde_json::Error),
     #[error("TOML parsing error: {0}")]
     TomlParsing(#[from] toml::de::Error),
+    #[error("TOML serialization error: {0}")]
+    TomlSerialization(#[from] toml::ser::Error),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

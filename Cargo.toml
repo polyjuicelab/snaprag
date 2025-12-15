@@ -1,6 +1,6 @@
 [package]
 name = "snaprag"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2021"
 description = "A Farcaster data synchronization and RAG (Retrieval-Augmented Generation) library"
 license = "MIT"
@@ -41,6 +41,8 @@ http = "1.0"
 sha2 = "0.10"
 base64 = "0.21"
 hex = "0.4"
+hmac = "0.12"
+rand = "0.8"
 reqwest = { version = "0.11", features = ["json"] }
 tempfile = "3.0"
 clap = { version = "4.0", features = ["derive"] }
