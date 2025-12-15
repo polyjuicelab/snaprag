@@ -56,7 +56,8 @@ fn test_build_signature_string() {
     let timestamp = 1234567890;
 
     let sig_string = build_signature_string(method, &uri, body_hash, timestamp);
-    let expected = "GET\n/api/profiles/123\nlimit=10\n\n1234567890";
+    // Path should have /api prefix stripped
+    let expected = "GET\n/profiles/123\nlimit=10\n\n1234567890";
     assert_eq!(sig_string, expected);
 }
 
@@ -68,7 +69,8 @@ fn test_build_signature_string_with_body() {
     let timestamp = 1234567890;
 
     let sig_string = build_signature_string(method, &uri, body_hash, timestamp);
-    let expected = "POST\n/api/search/profiles\n\nabc123def456\n1234567890";
+    // Path should have /api prefix stripped
+    let expected = "POST\n/search/profiles\n\nabc123def456\n1234567890";
     assert_eq!(sig_string, expected);
 }
 
@@ -129,6 +131,7 @@ fn test_auth_state_new() {
 
     let auth_config = AuthConfig {
         enabled: true,
+        time_window_secs: 300,
         tokens,
     };
 
@@ -152,6 +155,7 @@ fn test_auth_state_verify_timestamp() {
 
     let auth_config = AuthConfig {
         enabled: true,
+        time_window_secs: 300,
         tokens: HashMap::new(),
     };
 
@@ -177,6 +181,7 @@ fn test_auth_state_verify_timestamp() {
 fn test_auth_state_disabled() {
     let auth_config = AuthConfig {
         enabled: false,
+        time_window_secs: 300,
         tokens: HashMap::new(),
     };
 
@@ -184,10 +189,10 @@ fn test_auth_state_disabled() {
     assert!(!auth_state.is_enabled());
 }
 
-#[tokio::test]
-async fn test_compute_body_hash() {
+#[test]
+fn test_compute_body_hash() {
     let body = b"{\"test\": \"data\"}";
-    let hash = compute_body_hash(body).await;
+    let hash = compute_body_hash(body);
 
     // SHA256 of the test data
     assert!(!hash.is_empty());
@@ -213,21 +218,22 @@ fn test_compute_body_hash_empty() {
 #[test]
 fn test_signature_string_format() {
     // Test various combinations to ensure format is correct
+    // Note: build_signature_string strips /api prefix
     let test_cases = vec![
-        ("GET", "/api/test", "", "", "GET\n/api/test\n\n\n1234567890"),
+        ("GET", "/api/test", "", "", "GET\n/test\n\n\n1234567890"),
         (
             "POST",
             "/api/test",
             "query=value",
             "bodyhash",
-            "POST\n/api/test\nquery=value\nbodyhash\n1234567890",
+            "POST\n/test\nquery=value\nbodyhash\n1234567890",
         ),
         (
             "PUT",
             "/api/resource/123",
             "",
             "hash123",
-            "PUT\n/api/resource/123\n\nhash123\n1234567890",
+            "PUT\n/resource/123\n\nhash123\n1234567890",
         ),
     ];
 

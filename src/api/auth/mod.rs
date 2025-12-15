@@ -37,13 +37,13 @@ impl AuthState {
         Self {
             tokens: Arc::new(config.tokens.clone()),
             enabled: config.enabled,
-            time_window: 300, // 5 minutes default
+            time_window: config.time_window_secs,
         }
     }
 
     /// Check if authentication is enabled
     #[must_use]
-    pub fn is_enabled(&self) -> bool {
+    pub const fn is_enabled(&self) -> bool {
         self.enabled
     }
 
@@ -52,8 +52,9 @@ impl AuthState {
     /// # Returns
     /// - `Some(secret)` if token exists
     /// - `None` if token not found
-    pub fn get_secret(&self, token: &str) -> Option<&String> {
-        self.tokens.get(token)
+    #[must_use]
+    pub fn get_secret(&self, token: &str) -> Option<&str> {
+        self.tokens.get(token).map(String::as_str)
     }
 
     /// Get time window for timestamp validation
@@ -67,19 +68,33 @@ impl AuthState {
     /// # Returns
     /// - `Ok(())` if timestamp is valid
     /// - `Err(String)` with error message if invalid
+    ///
+    /// # Errors
+    /// Returns an error if the timestamp is outside the configured time window
+    ///
+    /// # Panics
+    /// This function may panic if the system time is before the Unix epoch (1970-01-01),
+    /// which should never happen in practice on modern systems
     pub fn verify_timestamp(&self, timestamp: i64) -> Result<(), String> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
+            .map_err(|_| "System time is before Unix epoch".to_string())?
+            .as_secs();
 
-        let diff = (timestamp - now).abs();
-        let window = self.time_window as i64;
+        // Safe cast: u64 to i64 for timestamp comparison
+        // Timestamps are positive and well within i64 range
+        let now_i64: i64 = now
+            .try_into()
+            .map_err(|_| "Timestamp overflow".to_string())?;
+        let diff: i64 = (timestamp - now_i64).abs();
+
+        // Safe cast: u64 to i64 for window comparison
+        let window: i64 =
+            i64::try_from(self.time_window).map_err(|_| "Time window overflow".to_string())?;
 
         if diff > window {
             Err(format!(
-                "Timestamp out of window: {} seconds (max: {} seconds)",
-                diff, window
+                "Timestamp out of window: {diff} seconds (max: {window} seconds)"
             ))
         } else {
             Ok(())
@@ -92,6 +107,12 @@ impl AuthState {
 /// # Returns
 /// - `Ok((token, timestamp, signature))` if all headers present
 /// - `Err(String)` with error message if any header missing
+///
+/// # Errors
+/// Returns an error if:
+/// - X-Token header is missing or invalid
+/// - X-Timestamp header is missing or cannot be parsed as i64
+/// - X-Signature header is missing or invalid
 pub fn extract_auth_headers(headers: &HeaderMap) -> Result<(String, i64, String), String> {
     let token = headers
         .get("X-Token")
@@ -106,7 +127,7 @@ pub fn extract_auth_headers(headers: &HeaderMap) -> Result<(String, i64, String)
 
     let timestamp = timestamp_str
         .parse::<i64>()
-        .map_err(|_| format!("Invalid timestamp format: {}", timestamp_str))?;
+        .map_err(|_| format!("Invalid timestamp format: {timestamp_str}"))?;
 
     let signature = headers
         .get("X-Signature")

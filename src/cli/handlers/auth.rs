@@ -15,6 +15,10 @@ use crate::Result;
 /// # Errors
 /// - File I/O errors when reading or writing config file
 /// - TOML parsing/serialization errors
+///
+/// # Panics
+/// This function may panic if the TOML value cannot be converted to a table,
+/// which should only happen if the config file structure is corrupted
 pub fn handle_auth_generate(config: &AppConfig, name: Option<String>) -> Result<()> {
     let token_name = name.unwrap_or_else(|| {
         // Generate a default name using UUID
@@ -60,7 +64,7 @@ pub fn handle_auth_generate(config: &AppConfig, name: Option<String>) -> Result<
 
     if let Some(auth_table) = auth_section {
         // Add token to existing auth section
-        auth_table.insert(token_name.clone(), toml::Value::String(secret.clone()));
+        auth_table.insert(token_name, toml::Value::String(secret));
         if !auth_table.contains_key("enabled") {
             auth_table.insert("enabled".to_string(), toml::Value::Boolean(true));
         }
@@ -68,11 +72,11 @@ pub fn handle_auth_generate(config: &AppConfig, name: Option<String>) -> Result<
         // Create new auth section
         let mut auth_table = toml::map::Map::new();
         auth_table.insert("enabled".to_string(), toml::Value::Boolean(true));
-        auth_table.insert(token_name.clone(), toml::Value::String(secret.clone()));
+        auth_table.insert(token_name, toml::Value::String(secret));
 
         toml_value
             .as_table_mut()
-            .unwrap()
+            .expect("Config should be a valid TOML table")
             .insert("auth".to_string(), toml::Value::Table(auth_table));
     }
 
@@ -124,12 +128,11 @@ pub fn handle_auth_list(config: &AppConfig) -> Result<()> {
 /// - File I/O errors when reading or writing config file
 /// - TOML parsing/serialization errors
 /// - Token not found
-pub fn handle_auth_revoke(config: &AppConfig, name: String) -> Result<()> {
+pub fn handle_auth_revoke(config: &AppConfig, name: &str) -> Result<()> {
     // Check if token exists
-    if !config.auth.tokens.contains_key(&name) {
+    if !config.auth.tokens.contains_key(name) {
         return Err(crate::SnapRagError::Custom(format!(
-            "Token '{}' not found in configuration",
-            name
+            "Token '{name}' not found in configuration"
         )));
     }
 
@@ -157,7 +160,7 @@ pub fn handle_auth_revoke(config: &AppConfig, name: String) -> Result<()> {
         .and_then(|v| v.as_table_mut())
     {
         // Remove token
-        if auth_table.remove(&name).is_some() {
+        if auth_table.remove(name).is_some() {
             // Write back to file
             let updated_content = toml::to_string_pretty(&toml_value)?;
             fs::write(config_path, updated_content)?;
@@ -165,8 +168,7 @@ pub fn handle_auth_revoke(config: &AppConfig, name: String) -> Result<()> {
             info!("✅ Token '{}' revoked from {}", name, config_path);
         } else {
             return Err(crate::SnapRagError::Custom(format!(
-                "Token '{}' not found in config file",
-                name
+                "Token '{name}' not found in config file"
             )));
         }
     } else {

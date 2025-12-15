@@ -8,7 +8,6 @@ use axum::middleware::Next;
 use axum::response::IntoResponse;
 use axum::response::Response;
 use tracing::debug;
-use tracing::info;
 use tracing::warn;
 
 use super::extract_auth_headers;
@@ -88,22 +87,18 @@ pub async fn auth_middleware(
     };
 
     // Build signature string
-    // Note: request.uri().path() includes the full path with /api prefix
-    // Client signs with /api/profiles/..., so we need to match that
+    // Note: build_signature_string strips /api prefix to match client-side signing
     let signature_string =
         build_signature_string(request.method(), request.uri(), &body_hash, timestamp);
 
-    // Debug: log the actual URI path
+    // Debug logging for signature verification
     debug!("Request URI path: {:?}", request.uri().path());
-
-    // Debug logging
-    warn!(
-        "🔐 Signature verification - Token: {}, Timestamp: {}, Body hash: '{}', Sig string: {:?}",
+    debug!(
+        "Signature verification - Token: {}, Timestamp: {}, Body hash: '{}', Sig string: {:?}",
         token, timestamp, body_hash, signature_string
     );
-    warn!("🔐 Request URI path: {:?}", request.uri().path());
-    warn!(
-        "🔐 Provided signature: {}",
+    debug!(
+        "Provided signature: {}",
         &provided_signature.chars().take(30).collect::<String>()
     );
 

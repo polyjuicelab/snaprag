@@ -402,7 +402,7 @@ async fn main() -> Result<()> {
                 snaprag::cli::handle_auth_list(&config)?;
             }
             snaprag::cli::AuthCommands::Revoke { name } => {
-                snaprag::cli::handle_auth_revoke(&config, name)?;
+                snaprag::cli::handle_auth_revoke(&config, &name)?;
             }
         },
         Commands::Fetch(fetch_command) => match fetch_command {

@@ -67,6 +67,13 @@ pub fn compute_body_hash(body: &[u8]) -> String {
 /// # Returns
 /// - `Ok(())` if signature is valid
 /// - `Err(String)` with error message if invalid
+///
+/// # Errors
+/// Returns an error if:
+/// - The secret format is invalid (not hex-encoded)
+/// - HMAC creation fails
+/// - Signature length doesn't match
+/// - Signature doesn't match the computed signature
 pub fn verify_signature(
     secret: &str,
     signature_string: &str,
@@ -106,6 +113,9 @@ pub fn verify_signature(
 /// This function reads the request body and computes its hash.
 /// Note: The body can only be read once, so this should be called
 /// before the body is consumed by handlers.
+///
+/// # Errors
+/// Returns an error if the request body cannot be read or hashing fails
 pub async fn extract_and_hash_body(request: &mut Request) -> Result<String, String> {
     // Take ownership of the body to read it
     let body = std::mem::replace(request.body_mut(), Body::empty());
@@ -150,10 +160,10 @@ mod tests {
         assert_eq!(sig_string, expected);
     }
 
-    #[tokio::test]
-    async fn test_compute_body_hash() {
+    #[test]
+    fn test_compute_body_hash() {
         let body = b"{\"test\": \"data\"}";
-        let hash = compute_body_hash(body).await;
+        let hash = compute_body_hash(body);
         // SHA256 of the test data
         assert!(!hash.is_empty());
         assert_eq!(hash.len(), 64); // Hex-encoded SHA256 is 64 chars
