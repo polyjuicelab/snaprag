@@ -15,6 +15,7 @@ use std::collections::HashMap;
 /// let emojis = extract_emojis(text);
 /// assert_eq!(emojis, vec!["🔥", "💎"]);
 /// ```
+#[must_use]
 pub fn extract_emojis(text: &str) -> Vec<String> {
     text.chars()
         .filter(|c| is_emoji(*c))
@@ -31,7 +32,7 @@ pub fn extract_emojis(text: &str) -> Vec<String> {
 /// - Supplemental Symbols (🩰-🩿)
 /// - Symbols & Pictographs Extended-A (🪀-🪿)
 /// - Symbols & Pictographs Extended-B (🫀-🫿)
-fn is_emoji(c: char) -> bool {
+const fn is_emoji(c: char) -> bool {
     // Check various emoji ranges
     let code = c as u32;
     matches!(
@@ -47,7 +48,7 @@ fn is_emoji(c: char) -> bool {
 }
 
 /// Check for extended emoji ranges (newer Unicode versions)
-fn is_emoji_extended(c: char) -> bool {
+const fn is_emoji_extended(c: char) -> bool {
     let code = c as u32;
     // Extended ranges for newer emoji
     matches!(code, 0x1FA00..=0x1FAFF) // Chess Symbols, Symbols and Pictographs Extended-A
@@ -67,6 +68,7 @@ fn is_emoji_extended(c: char) -> bool {
 /// assert_eq!(frequencies.get("🔥"), Some(&2));
 /// assert_eq!(frequencies.get("💎"), Some(&1));
 /// ```
+#[must_use]
 pub fn count_emoji_frequencies(text: &str) -> HashMap<String, usize> {
     let mut frequencies = HashMap::new();
     let emojis = extract_emojis(text);

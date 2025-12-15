@@ -266,7 +266,7 @@ pub async fn get_social_analysis(
     let start_time = std::time::Instant::now();
     info!("GET /api/social/{}", fid);
 
-    let job_key = format!("social:{}", fid);
+    let job_key = format!("social:{fid}");
 
     // Check cache first
     tracing::debug!("Checking cache for social analysis FID {}", fid);
@@ -486,7 +486,7 @@ pub async fn get_social_analysis_by_username(
     };
 
     let fid = profile.fid;
-    let job_key = format!("social:{}", fid);
+    let job_key = format!("social:{fid}");
 
     // Check cache first for the FID
     match state.cache_service.get_social(fid).await {

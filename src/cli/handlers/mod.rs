@@ -21,6 +21,7 @@
 
 pub mod ask;
 pub mod ask_handler;
+pub mod auth;
 pub mod cache;
 pub mod cast;
 pub mod data;
@@ -39,6 +40,7 @@ pub mod sync;
 // Re-export all public handlers
 pub use ask::*;
 pub use ask_handler::*;
+pub use auth::*;
 pub use cache::*;
 pub use cast::*;
 pub use data::*;
