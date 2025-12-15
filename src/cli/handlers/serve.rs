@@ -308,7 +308,10 @@ pub async fn handle_serve_worker(
             );
             loop {
                 // Pop job from any queue using BRPOP (fair, returns first available)
-                let queue_refs: Vec<&str> = queues_clone.iter().map(|s| s.as_str()).collect();
+                let queue_refs: Vec<&str> = queues_clone
+                    .iter()
+                    .map(std::string::String::as_str)
+                    .collect();
                 match redis_clone
                     .pop_job_from_queues(&queue_refs, Duration::from_secs(5))
                     .await
@@ -352,14 +355,17 @@ pub async fn handle_serve_worker(
                             .get("type")
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown");
-                        let fid = job.get("fid").and_then(|v| v.as_i64()).ok_or_else(|| {
-                            crate::SnapRagError::Custom("Missing fid in job data".to_string())
-                        });
+                        let fid = job
+                            .get("fid")
+                            .and_then(serde_json::Value::as_i64)
+                            .ok_or_else(|| {
+                                crate::SnapRagError::Custom("Missing fid in job data".to_string())
+                            });
 
                         match fid {
                             Ok(fid) => {
                                 // Construct job key from job type and FID
-                                let job_key = format!("{}:{}", job_type, fid);
+                                let job_key = format!("{job_type}:{fid}");
 
                                 // Update status to processing
                                 let status_update_start = std::time::Instant::now();
@@ -502,7 +508,7 @@ pub async fn handle_serve_worker(
                                                     .set_job_status(
                                                         &job_key,
                                                         "failed",
-                                                        Some(&format!("{}", e)),
+                                                        Some(&format!("{e}")),
                                                     )
                                                     .await
                                                 {
@@ -675,7 +681,7 @@ pub async fn handle_serve_worker(
                                                     .set_job_status(
                                                         &job_key,
                                                         "failed",
-                                                        Some(&format!("{}", e)),
+                                                        Some(&format!("{e}")),
                                                     )
                                                     .await
                                                 {
@@ -847,7 +853,7 @@ pub async fn handle_serve_worker(
                                                     .set_job_status(
                                                         &job_key,
                                                         "failed",
-                                                        Some(&format!("{}", e)),
+                                                        Some(&format!("{e}")),
                                                     )
                                                     .await
                                                 {
@@ -900,7 +906,7 @@ pub async fn handle_serve_worker(
         handles.push(handle);
     }
 
-    println!("✅ {} worker(s) started", workers);
+    println!("✅ {workers} worker(s) started");
     println!("⏳ Waiting for jobs...\n");
 
     // Wait for all workers (they run forever)
@@ -944,7 +950,9 @@ pub async fn handle_worker_status(
         // Check for long-running queries (30 seconds threshold)
         match db.get_long_running_queries(30).await {
             Ok(stuck_queries) => {
-                if !stuck_queries.is_empty() {
+                if stuck_queries.is_empty() {
+                    println!("✅ No long-running database queries found\n");
+                } else {
                     println!(
                         "⚠️  Long-running Database Queries ({}):\n",
                         stuck_queries.len()
@@ -955,28 +963,23 @@ pub async fn handle_worker_status(
                         let seconds = duration_secs % 60;
 
                         let duration_str = if hours > 0 {
-                            format!("{}h {}m {}s", hours, minutes, seconds)
+                            format!("{hours}h {minutes}m {seconds}s")
                         } else if minutes > 0 {
-                            format!("{}m {}s", minutes, seconds)
+                            format!("{minutes}m {seconds}s")
                         } else {
-                            format!("{}s", seconds)
+                            format!("{seconds}s")
                         };
 
-                        println!(
-                            "   🔴 PID {} - Running for {} ({})",
-                            pid, duration_str, state
-                        );
+                        println!("   🔴 PID {pid} - Running for {duration_str} ({state})");
                         if let Some(app) = app_name {
-                            println!("      Application: {}", app);
+                            println!("      Application: {app}");
                         }
                         if let Some(addr) = client_addr {
-                            println!("      Client: {}", addr);
+                            println!("      Client: {addr}");
                         }
-                        println!("      Query: {}", query);
+                        println!("      Query: {query}");
                         println!();
                     }
-                } else {
-                    println!("✅ No long-running database queries found\n");
                 }
             }
             Err(e) => {
@@ -992,7 +995,7 @@ pub async fn handle_worker_status(
 
     if active_jobs.is_empty() {
         if let Some(q) = &queue {
-            println!("ℹ️  No active jobs found in queue '{}'", q);
+            println!("ℹ️  No active jobs found in queue '{q}'");
         } else {
             println!("ℹ️  No active jobs found");
         }
@@ -1031,19 +1034,15 @@ pub async fn handle_worker_status(
                 let seconds = dur % 60;
                 if hours > 0 {
                     println!(
-                        "   • {}:{} - Processing for {}h {}m {}s",
-                        job_type, fid, hours, minutes, seconds
+                        "   • {job_type}:{fid} - Processing for {hours}h {minutes}m {seconds}s"
                     );
                 } else if minutes > 0 {
-                    println!(
-                        "   • {}:{} - Processing for {}m {}s",
-                        job_type, fid, minutes, seconds
-                    );
+                    println!("   • {job_type}:{fid} - Processing for {minutes}m {seconds}s");
                 } else {
-                    println!("   • {}:{} - Processing for {}s", job_type, fid, seconds);
+                    println!("   • {job_type}:{fid} - Processing for {seconds}s");
                 }
             } else {
-                println!("   • {}:{} - Processing", job_type, fid);
+                println!("   • {job_type}:{fid} - Processing");
             }
         }
         println!();
@@ -1054,13 +1053,13 @@ pub async fn handle_worker_status(
         println!("📋 Pending ({}):", pending.len());
         for (job_key, _result) in pending {
             let (job_type, fid) = job_key.split_once(':').unwrap_or(("unknown", "unknown"));
-            println!("   • {}:{}", job_type, fid);
+            println!("   • {job_type}:{fid}");
         }
         println!();
         println!("   ⚠️  Note: Pending jobs are waiting for a worker to process them.");
         println!("      Make sure you have a worker running with:");
         if let Some(q) = &queue {
-            println!("      snaprag serve worker --queue {}", q);
+            println!("      snaprag serve worker --queue {q}");
         } else {
             println!("      snaprag serve worker --queue <queue_name>");
             println!("      (Current pending jobs are in different queues)");
@@ -1073,7 +1072,7 @@ pub async fn handle_worker_status(
         println!("✅ Completed ({}):", completed.len());
         for (job_key, _result) in completed {
             let (job_type, fid) = job_key.split_once(':').unwrap_or(("unknown", "unknown"));
-            println!("   • {}:{}", job_type, fid);
+            println!("   • {job_type}:{fid}");
         }
         println!();
     }
@@ -1090,9 +1089,9 @@ pub async fn handle_worker_status(
                 } else {
                     err
                 };
-                println!("   • {}:{} - {}", job_type, fid, error_msg);
+                println!("   • {job_type}:{fid} - {error_msg}");
             } else {
-                println!("   • {}:{}", job_type, fid);
+                println!("   • {job_type}:{fid}");
             }
         }
         println!();
@@ -1103,7 +1102,7 @@ pub async fn handle_worker_status(
         warn!("⚠️  Unknown status ({}):", unknown.len());
         for (job_key, status, _result) in unknown {
             let (job_type, fid) = job_key.split_once(':').unwrap_or(("unknown", "unknown"));
-            println!("   • {}:{} - Status: {}", job_type, fid, status);
+            println!("   • {job_type}:{fid} - Status: {status}");
         }
         println!();
     }
@@ -1125,29 +1124,28 @@ async fn handle_job_details(
 ) -> Result<()> {
     use tracing::warn;
 
-    println!("🔍 Job Details: {}", job_key);
+    println!("🔍 Job Details: {job_key}");
     println!("================{}\n", "=".repeat(job_key.len()));
 
     // Parse job key (format: type:fid)
     let (job_type, fid_str) = job_key.split_once(':').ok_or_else(|| {
         crate::SnapRagError::Custom(format!(
-            "Invalid job key format: {}. Expected format: type:fid (e.g., social:66)",
-            job_key
+            "Invalid job key format: {job_key}. Expected format: type:fid (e.g., social:66)"
         ))
     })?;
 
     let fid: i64 = fid_str
         .parse()
-        .map_err(|_| crate::SnapRagError::Custom(format!("Invalid FID: {}", fid_str)))?;
+        .map_err(|_| crate::SnapRagError::Custom(format!("Invalid FID: {fid_str}")))?;
 
-    println!("   Type: {}", job_type);
-    println!("   FID: {}\n", fid);
+    println!("   Type: {job_type}");
+    println!("   FID: {fid}\n");
 
     // Get job status from Redis
     match redis.get_job_status(job_key).await {
         Ok(Some((status, result))) => {
             println!("📊 Redis Status:");
-            println!("   Status: {}", status);
+            println!("   Status: {status}");
 
             if let Some(result_data) = result {
                 if status == "completed" {
@@ -1181,7 +1179,7 @@ async fn handle_job_details(
             println!();
         }
         Ok(None) => {
-            println!("⚠️  No status found in Redis for job: {}\n", job_key);
+            println!("⚠️  No status found in Redis for job: {job_key}\n");
         }
         Err(e) => {
             warn!("Failed to get job status from Redis: {}\n", e);
@@ -1214,43 +1212,17 @@ async fn handle_job_details(
                     })
                     .collect();
 
-                if !relevant_queries.is_empty() {
-                    println!(
-                        "   Found {} potentially related query/queries:\n",
-                        relevant_queries.len()
-                    );
-                    for (pid, duration_secs, state, query, app_name, client_addr) in
-                        relevant_queries
-                    {
-                        let hours = duration_secs / 3600;
-                        let minutes = (duration_secs % 3600) / 60;
-                        let seconds = duration_secs % 60;
-
-                        let duration_str = if hours > 0 {
-                            format!("{}h {}m {}s", hours, minutes, seconds)
-                        } else if minutes > 0 {
-                            format!("{}m {}s", minutes, seconds)
-                        } else {
-                            format!("{}s", seconds)
-                        };
-
-                        println!(
-                            "   🔴 PID {} - Running for {} ({})",
-                            pid, duration_str, state
-                        );
-                        if let Some(app) = app_name {
-                            println!("      Application: {}", app);
-                        }
-                        if let Some(addr) = client_addr {
-                            println!("      Client: {}", addr);
-                        }
-                        println!("      Query: {}", query);
-                        println!();
-                    }
-                } else {
+                if relevant_queries.is_empty() {
                     // Show all long-running queries anyway to help debug
                     if let Ok(all_queries) = db.get_long_running_queries(30).await {
-                        if !all_queries.is_empty() {
+                        if all_queries.is_empty() {
+                            println!("   ✅ No long-running database queries found");
+                            println!("   💡 This suggests the job might be:");
+                            println!("      - Waiting on external API calls (Snapchain)");
+                            println!("      - Processing large datasets in memory");
+                            println!("      - Stuck in a loop or deadlock");
+                            println!();
+                        } else {
                             println!("   ⚠️  No direct matches found, but there are {} long-running queries:", all_queries.len());
                             println!("      (This job might be waiting on network/API calls, not database)\n");
                             for (pid, duration_secs, state, query, _, _) in
@@ -1269,14 +1241,37 @@ async fn handle_job_details(
                                 );
                             }
                             println!();
-                        } else {
-                            println!("   ✅ No long-running database queries found");
-                            println!("   💡 This suggests the job might be:");
-                            println!("      - Waiting on external API calls (Snapchain)");
-                            println!("      - Processing large datasets in memory");
-                            println!("      - Stuck in a loop or deadlock");
-                            println!();
                         }
+                    }
+                } else {
+                    println!(
+                        "   Found {} potentially related query/queries:\n",
+                        relevant_queries.len()
+                    );
+                    for (pid, duration_secs, state, query, app_name, client_addr) in
+                        relevant_queries
+                    {
+                        let hours = duration_secs / 3600;
+                        let minutes = (duration_secs % 3600) / 60;
+                        let seconds = duration_secs % 60;
+
+                        let duration_str = if hours > 0 {
+                            format!("{hours}h {minutes}m {seconds}s")
+                        } else if minutes > 0 {
+                            format!("{minutes}m {seconds}s")
+                        } else {
+                            format!("{seconds}s")
+                        };
+
+                        println!("   🔴 PID {pid} - Running for {duration_str} ({state})");
+                        if let Some(app) = app_name {
+                            println!("      Application: {app}");
+                        }
+                        if let Some(addr) = client_addr {
+                            println!("      Client: {addr}");
+                        }
+                        println!("      Query: {query}");
+                        println!();
                     }
                 }
             }
@@ -1316,7 +1311,7 @@ async fn handle_job_details(
                     .await
             {
                 if cast_count > 1000 {
-                    println!("   ⚠️  WARNING: User has {} casts", cast_count);
+                    println!("   ⚠️  WARNING: User has {cast_count} casts");
                     println!("      analyze_mentions() will process ALL casts - this can take a long time!");
                     println!("      Each cast needs to be parsed for mentions (@username)");
                     println!();
@@ -1332,7 +1327,7 @@ async fn handle_job_details(
             .await
             {
                 if following_count > 10000 {
-                    println!("   ⚠️  WARNING: User follows {} users", following_count);
+                    println!("   ⚠️  WARNING: User follows {following_count} users");
                     println!("      categorize_social_circles() needs to analyze each one - this can take a long time!");
                     println!();
                 }
@@ -1346,9 +1341,9 @@ async fn handle_job_details(
             .await
             {
                 if followers_count > 10000 {
-                    println!("   ⚠️  CRITICAL: User has {} followers", followers_count);
+                    println!("   ⚠️  CRITICAL: User has {followers_count} followers");
                     println!("      get_followers() query is the BOTTLENECK!");
-                    println!("      - Must scan {} link records with window function", followers_count);
+                    println!("      - Must scan {followers_count} link records with window function");
                     println!("      - Window function (ROW_NUMBER OVER) is expensive at this scale");
                     println!("      - Estimated time: 20-40+ minutes for this query alone");
                     println!("      - categorize_social_circles() only samples 50 users (fast)");
@@ -1365,7 +1360,7 @@ async fn handle_job_details(
             .await
             {
                 Ok(count) => {
-                    println!("   Follow links: {} (total entries)", count);
+                    println!("   Follow links: {count} (total entries)");
                 }
                 Err(e) => {
                     warn!("Failed to check links count: {}", e);
@@ -1379,7 +1374,7 @@ async fn handle_job_details(
                 .await
             {
                 Ok(count) => {
-                    println!("   Casts: {}", count);
+                    println!("   Casts: {count}");
                 }
                 Err(e) => {
                     warn!("Failed to check casts count: {}", e);
@@ -1394,10 +1389,7 @@ async fn handle_job_details(
 
     println!("💡 Diagnostic Tips:");
     println!("   1. Check worker logs:");
-    println!(
-        "      Look for 'Worker X: Analyzing social graph for FID {}'",
-        fid
-    );
+    println!("      Look for 'Worker X: Analyzing social graph for FID {fid}'");
     println!("      Look for step-by-step debug logs (analyze_mentions, categorize_social_circles, etc.)");
     println!();
     println!("   2. Most likely causes for long runtime:");
@@ -1430,18 +1422,12 @@ async fn handle_job_details(
             .unwrap_or(0);
 
             println!("      🔴 get_followers() - CRITICAL BOTTLENECK ⚠️");
-            println!(
-                "         Querying {} followers with window function",
-                followers_count
-            );
+            println!("         Querying {followers_count} followers with window function");
             println!("         This is the most likely cause of 40+ minute runtime!");
             println!(
                 "         The query must scan all links and apply ROW_NUMBER() window function"
             );
-            println!(
-                "         Estimated time: 20-40+ minutes for {} followers",
-                followers_count
-            );
+            println!("         Estimated time: 20-40+ minutes for {followers_count} followers");
             println!();
             println!(
                 "      • analyze_mentions() - Only processes top 100 casts (LIMIT 100) - FAST"
@@ -1449,8 +1435,7 @@ async fn handle_job_details(
             println!("      • categorize_social_circles() - Only samples 50 users - FAST");
             println!("      • generate_word_cloud() - Processes recent casts - FAST");
             println!(
-                "      • get_top_users() - Sorts {} followers to get top 5 - MODERATE",
-                followers_count
+                "      • get_top_users() - Sorts {followers_count} followers to get top 5 - MODERATE"
             );
         } else {
             println!("      • analyze_mentions() - Processing ALL casts for mentions");
@@ -1460,7 +1445,7 @@ async fn handle_job_details(
     }
     println!();
     println!("   3. To see real-time progress:");
-    println!("      tail -f <log_file> | grep 'FID {}'", fid);
+    println!("      tail -f <log_file> | grep 'FID {fid}'");
     println!();
     println!("   4. If stuck for > 1 hour, consider:");
     println!("      • Check if worker process is actually running (not hung)");

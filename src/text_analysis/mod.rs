@@ -20,6 +20,7 @@ pub struct TaggedWord {
 }
 
 /// Detect language of text
+#[must_use]
 pub fn detect_language(text: &str) -> LanguageInfo {
     use whatlang::detect;
     use whatlang::Lang;
@@ -60,6 +61,7 @@ pub fn detect_language(text: &str) -> LanguageInfo {
 }
 
 /// Tokenize and tag words for a given language
+#[must_use]
 pub fn tokenize_and_tag(text: &str, language: &str) -> Vec<TaggedWord> {
     match language {
         "zh" => tokenize_chinese(text),
@@ -103,7 +105,7 @@ fn tokenize_english(text: &str) -> Vec<TaggedWord> {
             let pos = if cleaned.ends_with("ing")
                 || cleaned.ends_with("ed")
                 || cleaned.ends_with("es")
-                || cleaned.ends_with("s")
+                || cleaned.ends_with('s')
             {
                 "v" // verb
             } else if cleaned.ends_with("tion")
@@ -175,6 +177,7 @@ fn tokenize_korean(text: &str) -> Vec<TaggedWord> {
 }
 
 /// Extract nouns from tagged words
+#[must_use]
 pub fn extract_nouns(tagged_words: &[TaggedWord]) -> Vec<String> {
     tagged_words
         .iter()
@@ -189,6 +192,7 @@ pub fn extract_nouns(tagged_words: &[TaggedWord]) -> Vec<String> {
 }
 
 /// Extract verbs from tagged words
+#[must_use]
 pub fn extract_verbs(tagged_words: &[TaggedWord]) -> Vec<String> {
     tagged_words
         .iter()
@@ -203,6 +207,7 @@ pub fn extract_verbs(tagged_words: &[TaggedWord]) -> Vec<String> {
 }
 
 /// Count word frequencies with stop word filtering
+#[must_use]
 pub fn count_word_frequencies(words: &[String], language: &str) -> HashMap<String, usize> {
     use std::collections::HashSet;
 

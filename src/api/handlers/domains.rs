@@ -36,7 +36,7 @@ pub async fn get_domains(
     let mut username_type = None;
 
     for proof in proofs {
-        let username_type_enum = UsernameType::from(proof.username_type as i32);
+        let username_type_enum = UsernameType::from(i32::from(proof.username_type));
         match username_type_enum {
             UsernameType::EnsL1 => {
                 has_ens = true;

@@ -9,8 +9,8 @@ use crate::api::metrics;
 
 /// Prometheus metrics endpoint handler
 pub async fn get_metrics() -> Result<impl IntoResponse, StatusCode> {
-    match metrics::get_metrics() {
-        Some(m) => match m.export() {
+    if let Some(m) = metrics::get_metrics() {
+        match m.export() {
             Ok(metrics_text) => Ok(Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", "text/plain; version=0.0.4")
@@ -20,10 +20,9 @@ pub async fn get_metrics() -> Result<impl IntoResponse, StatusCode> {
                 error!("Failed to export metrics: {}", e);
                 Err(StatusCode::INTERNAL_SERVER_ERROR)
             }
-        },
-        None => {
-            error!("Metrics not initialized");
-            Err(StatusCode::SERVICE_UNAVAILABLE)
         }
+    } else {
+        error!("Metrics not initialized");
+        Err(StatusCode::SERVICE_UNAVAILABLE)
     }
 }

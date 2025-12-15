@@ -11,7 +11,10 @@ use serde::Serialize;
 use tracing::error;
 use tracing::info;
 
-use crate::api::handlers::job_helpers::*;
+use crate::api::handlers::job_helpers::check_or_create_job;
+use crate::api::handlers::job_helpers::create_job_status_response;
+use crate::api::handlers::job_helpers::JobConfig;
+use crate::api::handlers::job_helpers::JobResult;
 use crate::api::handlers::AppState;
 use crate::api::types::ApiResponse;
 use crate::config::MbtiMethod;
@@ -25,7 +28,7 @@ pub async fn get_mbti_analysis(
     let start_time = std::time::Instant::now();
     info!("GET /api/mbti/{}", fid);
 
-    let job_key = format!("mbti:{}", fid);
+    let job_key = format!("mbti:{fid}");
 
     // Check cache first
     match state.cache_service.get_mbti(fid).await {
@@ -318,7 +321,7 @@ pub async fn get_mbti_analysis_by_username(
     };
 
     let fid = profile.fid;
-    let job_key = format!("mbti:{}", fid);
+    let job_key = format!("mbti:{fid}");
 
     // Check cache first for the FID
     match state.cache_service.get_mbti(fid).await {
