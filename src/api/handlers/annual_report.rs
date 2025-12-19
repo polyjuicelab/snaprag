@@ -2,6 +2,8 @@
 ///
 /// This module provides a comprehensive annual report endpoint that combines
 /// data from all other endpoints into a single response.
+use std::collections::HashMap;
+
 use axum::extract::Path;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -10,14 +12,23 @@ use chrono::DateTime;
 use chrono::Utc;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use super::AppState;
 use crate::api::types::ApiResponse;
+use crate::utils::emoji::count_emoji_frequencies;
 
 /// Get annual report for a user
 ///
-/// Combines data from engagement, temporal activity, content style, follower growth,
-/// and domain status endpoints into a comprehensive annual report.
+/// Combines data from engagement, temporal activity, content style, and follower growth
+/// endpoints into a comprehensive annual report.
+///
+/// # Errors
+///
+/// Returns `StatusCode::BAD_REQUEST` if the year format is invalid.
+/// Returns `StatusCode::NOT_FOUND` if the user profile is not found.
+/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if database queries fail.
+#[allow(clippy::too_many_lines)]
 pub async fn get_annual_report(
     State(state): State<AppState>,
     Path((fid, year)): Path<(i64, u32)>,
@@ -34,9 +45,9 @@ pub async fn get_annual_report(
         .timestamp();
 
     // Convert to Farcaster timestamps
-    #[allow(clippy::cast_sign_loss)]
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
     let start_farcaster = crate::unix_to_farcaster_timestamp(year_start as u64) as i64;
-    #[allow(clippy::cast_sign_loss)]
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
     let end_farcaster = crate::unix_to_farcaster_timestamp(year_end as u64) as i64;
 
     // Get user profile
@@ -127,9 +138,19 @@ pub async fn get_annual_report(
         .get_current_follower_count(fid)
         .await
         .unwrap_or(0);
+    let current_following = state
+        .database
+        .get_current_following_count(fid)
+        .await
+        .unwrap_or(0);
     let followers_at_start = state
         .database
         .get_follower_count_at_timestamp(fid, start_farcaster)
+        .await
+        .unwrap_or(0);
+    let following_at_start = state
+        .database
+        .get_following_count_at_timestamp(fid, start_farcaster)
         .await
         .unwrap_or(0);
     let monthly_snapshots = state
@@ -138,49 +159,23 @@ pub async fn get_annual_report(
         .await
         .unwrap_or_default();
 
-    // Get domain status
-    let proofs = state
-        .database
-        .get_user_username_proofs(fid)
-        .await
-        .unwrap_or_default();
-    let mut has_ens = false;
-    let mut ens_name = None;
-    let mut has_farcaster_name = false;
-    let mut farcaster_name = None;
-    for proof in proofs {
-        let username_type = crate::models::UsernameType::from(i32::from(proof.username_type));
-        match username_type {
-            crate::models::UsernameType::EnsL1 => {
-                has_ens = true;
-                ens_name = Some(proof.username);
-            }
-            crate::models::UsernameType::Fname => {
-                has_farcaster_name = true;
-                farcaster_name = Some(proof.username);
-            }
-            _ => {}
-        }
-    }
-
     // Calculate days since registration
-    let days_since_registration = if let Some(reg_ts) = registered_at {
-        #[allow(clippy::cast_sign_loss)]
+    let days_since_registration = registered_at.map_or(0, |reg_ts| {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
         let reg_unix = crate::farcaster_to_unix_timestamp(reg_ts as u64) as i64;
         let reg_dt = DateTime::<Utc>::from_timestamp(reg_unix, 0).unwrap_or_else(Utc::now);
         let now = Utc::now();
         (now - reg_dt).num_days()
-    } else {
-        0
-    };
+    });
 
     // Calculate total casts in year
-    let total_casts = casts_text.len() as i64;
+    #[allow(clippy::cast_possible_wrap)]
+    let total_casts_in_year = casts_text.len() as i64;
+
+    // Get total casts count (all time, not just this year)
+    let total_casts_all_time = state.database.count_casts_by_fid(fid).await.unwrap_or(0);
 
     // Calculate emoji frequencies
-    use std::collections::HashMap;
-
-    use crate::utils::emoji::count_emoji_frequencies;
     let mut emoji_freq: HashMap<String, usize> = HashMap::new();
     for text in &casts_text {
         let freqs = count_emoji_frequencies(text);
@@ -188,6 +183,7 @@ pub async fn get_annual_report(
             *emoji_freq.entry(emoji).or_insert(0) += count;
         }
     }
+    #[allow(clippy::cast_possible_wrap)]
     let mut top_emojis: Vec<_> = emoji_freq.into_iter().map(|(e, c)| (e, c as i64)).collect();
     top_emojis.sort_by(|a, b| b.1.cmp(&a.1));
     top_emojis.truncate(3);
@@ -209,13 +205,10 @@ pub async fn get_annual_report(
             "pfp_url": profile.pfp_url,
             "registered_at": registered_at,
             "days_since_registration": days_since_registration,
-            "has_ens": has_ens,
-            "ens_name": ens_name,
-            "has_farcaster_name": has_farcaster_name,
-            "farcaster_name": farcaster_name,
         },
         "activity": {
-            "total_casts": total_casts,
+            "total_casts": total_casts_all_time,
+            "total_casts_in_year": total_casts_in_year,
             "first_cast": first_cast.map(|c| serde_json::json!({
                 "message_hash": hex::encode(c.message_hash),
                 "text": c.text,
@@ -260,8 +253,11 @@ pub async fn get_annual_report(
         },
         "social_growth": {
             "current_followers": current_followers,
+            "current_following": current_following,
             "followers_at_start": followers_at_start,
+            "following_at_start": following_at_start,
             "net_growth": current_followers.saturating_sub(followers_at_start),
+            "following_net_growth": current_following.saturating_sub(following_at_start),
             "monthly_snapshots": monthly_snapshots.into_iter().map(|s| serde_json::json!({
                 "month": s.month,
                 "followers": s.followers,

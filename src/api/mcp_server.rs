@@ -110,7 +110,7 @@ pub async fn serve_mcp(
             crate::api::redis_client::RedisClient::connect(&crate::config::RedisConfig {
                 url: "redis://127.0.0.1:6379".to_string(),
                 namespace: "snaprag:".to_string(),
-                default_ttl_secs: 2592000,
+                default_ttl_secs: 2_592_000,
                 stale_threshold_secs: 300,
                 refresh_channel: "snaprag.refresh".to_string(),
             })
