@@ -660,6 +660,32 @@ impl SnapchainClient {
         );
         Ok(fids_vec)
     }
+
+    /// Get username proofs by FID using gRPC
+    ///
+    /// # Errors
+    /// Returns an error if the gRPC call fails
+    pub async fn get_username_proofs_by_fid(
+        &self,
+        fid: u64,
+    ) -> Result<Vec<crate::generated::grpc_client::UserNameProof>> {
+        let mut grpc_client = self.grpc_client.clone();
+
+        let mut request = crate::generated::grpc_client::FidRequest::default();
+        request.fid = fid;
+
+        let response = grpc_client
+            .get_user_name_proofs_by_fid(request)
+            .await
+            .map_err(|e| {
+                crate::errors::SnapRagError::Custom(format!(
+                    "gRPC get_user_name_proofs_by_fid failed: {e}"
+                ))
+            })?;
+
+        let grpc_response = response.into_inner();
+        Ok(grpc_response.proofs)
+    }
 }
 
 fn convert_grpc_message_body(body: &message_data::Body) -> Value {
