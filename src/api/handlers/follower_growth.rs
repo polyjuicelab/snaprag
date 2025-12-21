@@ -14,6 +14,10 @@ use crate::api::types::FollowerGrowthResponse;
 use crate::api::types::MonthlyFollowerSnapshot;
 
 /// Get follower growth metrics for a user
+///
+/// # Errors
+/// Returns an error if database queries fail or API calls fail without fallback
+#[allow(clippy::too_many_lines)] // Complex handler with API fallback logic
 pub async fn get_follower_growth(
     State(state): State<AppState>,
     Path(fid): Path<i64>,
@@ -25,7 +29,7 @@ pub async fn get_follower_growth(
         fid, params.start_timestamp, params.end_timestamp
     );
 
-    // Get current counts
+    // Get current counts using database (reverted from API to avoid pagination issues)
     let current_followers = match state.database.get_current_follower_count(fid).await {
         Ok(count) => count,
         Err(e) => {
@@ -44,14 +48,20 @@ pub async fn get_follower_growth(
 
     // Convert Unix timestamps to Farcaster timestamps for database queries
     let start_farcaster = params.start_timestamp.map(|unix_ts| {
-        #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
+        // Timestamps are always positive and fit in i64
+        #[allow(clippy::cast_sign_loss)] // Unix timestamp is always positive
         let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
-        farcaster_ts as i64
+        #[allow(clippy::cast_possible_wrap)] // Farcaster timestamp fits in i64
+        let farcaster_ts_i64 = farcaster_ts as i64;
+        farcaster_ts_i64
     });
     let end_farcaster = params.end_timestamp.map(|unix_ts| {
-        #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
+        // Timestamps are always positive and fit in i64
+        #[allow(clippy::cast_sign_loss)] // Unix timestamp is always positive
         let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
-        farcaster_ts as i64
+        #[allow(clippy::cast_possible_wrap)] // Farcaster timestamp fits in i64
+        let farcaster_ts_i64 = farcaster_ts as i64;
+        farcaster_ts_i64
     });
 
     // Get counts at start of period

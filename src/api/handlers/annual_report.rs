@@ -10,12 +10,16 @@ use axum::http::StatusCode;
 use axum::Json;
 use chrono::DateTime;
 use chrono::Utc;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
-use tracing::warn;
 
 use super::AppState;
 use crate::api::types::ApiResponse;
+use crate::text_analysis::analyze_text;
+use crate::text_analysis::count_word_frequencies;
+use crate::text_analysis::extract_nouns;
+use crate::text_analysis::extract_verbs;
 use crate::utils::emoji::count_emoji_frequencies;
 
 /// Get annual report for a user
@@ -43,6 +47,10 @@ pub async fn get_annual_report(
     let year_end = DateTime::parse_from_rfc3339(&format!("{year}-12-31T23:59:59Z"))
         .map_err(|_| StatusCode::BAD_REQUEST)?
         .timestamp();
+    debug!(
+        "Calculating time range for year {}: start={}, end={}",
+        year, year_start, year_end
+    );
 
     // Convert to Farcaster timestamps
     #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
@@ -131,8 +139,12 @@ pub async fn get_annual_report(
         .get_frame_usage_count(fid, Some(start_farcaster), Some(end_farcaster))
         .await
         .unwrap_or(0);
+    debug!(
+        "Frame usage for FID {} in year {}: {} unique frames (timestamp range: {} to {})",
+        fid, year, frames_used, start_farcaster, end_farcaster
+    );
 
-    // Get follower growth
+    // Get follower growth using database (reverted from API to avoid pagination issues)
     let current_followers = state
         .database
         .get_current_follower_count(fid)
@@ -171,9 +183,17 @@ pub async fn get_annual_report(
     // Calculate total casts in year
     #[allow(clippy::cast_possible_wrap)]
     let total_casts_in_year = casts_text.len() as i64;
+    debug!(
+        "Casts in year {} for FID {}: {}",
+        year, fid, total_casts_in_year
+    );
 
     // Get total casts count (all time, not just this year)
     let total_casts_all_time = state.database.count_casts_by_fid(fid).await.unwrap_or(0);
+    debug!(
+        "Total casts (all time) for FID {}: {}",
+        fid, total_casts_all_time
+    );
 
     // Calculate emoji frequencies
     let mut emoji_freq: HashMap<String, usize> = HashMap::new();
@@ -186,7 +206,68 @@ pub async fn get_annual_report(
     #[allow(clippy::cast_possible_wrap)]
     let mut top_emojis: Vec<_> = emoji_freq.into_iter().map(|(e, c)| (e, c as i64)).collect();
     top_emojis.sort_by(|a, b| b.1.cmp(&a.1));
-    top_emojis.truncate(3);
+    top_emojis.truncate(10); // Show top 10 emojis
+    debug!("Top emojis count: {}", top_emojis.len());
+
+    // Calculate word frequencies
+    let mut word_freq_by_lang: HashMap<String, HashMap<String, usize>> = HashMap::new();
+
+    for text in &casts_text {
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        let (tagged_words, lang_info) = analyze_text(text);
+        let lang_code = &lang_info.lang_code;
+
+        // Extract nouns and verbs
+        let nouns = extract_nouns(&tagged_words);
+        let verbs = extract_verbs(&tagged_words);
+
+        // Combine nouns and verbs for word frequency analysis
+        let mut words = nouns;
+        words.extend(verbs);
+
+        // Count word frequencies by language
+        let word_freq = count_word_frequencies(&words, lang_code);
+        let lang_word_freq = word_freq_by_lang.entry(lang_code.clone()).or_default();
+        for (word, count) in word_freq {
+            *lang_word_freq.entry(word).or_insert(0) += count;
+        }
+    }
+
+    // Aggregate top words across all languages
+    let mut all_word_freq: HashMap<String, usize> = HashMap::new();
+    for freq_map in word_freq_by_lang.values() {
+        for (word, count) in freq_map {
+            *all_word_freq.entry(word.clone()).or_insert(0) += count;
+        }
+    }
+
+    // Get top words (excluding stop words)
+    #[allow(clippy::cast_possible_wrap)]
+    let mut top_words: Vec<_> = all_word_freq
+        .into_iter()
+        .map(|(word, count)| {
+            serde_json::json!({
+                "word": word,
+                "count": count as i64,
+            })
+        })
+        .collect();
+    top_words.sort_by(|a, b| {
+        let count_a = a
+            .get("count")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        let count_b = b
+            .get("count")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
+        count_b.cmp(&count_a)
+    });
+    top_words.truncate(20); // Show top 20 words
+    debug!("Top words count: {}", top_words.len());
 
     // Find most active hour and month
     let most_active_hour = hourly_dist.iter().max_by_key(|h| h.count).map(|h| h.hour);
@@ -249,6 +330,7 @@ pub async fn get_annual_report(
                 "emoji": e,
                 "count": c,
             })).collect::<Vec<_>>(),
+            "top_words": top_words,
             "frames_used": frames_used,
         },
         "social_growth": {

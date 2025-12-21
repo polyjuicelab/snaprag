@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
     } else if batch_mode {
         // Batch mode: process FIDs in batches of 1000, gradually expanding to full dataset
         println!("📊 Batch mode: Processing FIDs in batches of 1000...\n");
-        
+
         const BATCH_SIZE: i64 = 1000;
         let mut last_fid: Option<i64> = None;
         let mut batch_number = 0;
@@ -50,8 +50,10 @@ async fn main() -> Result<()> {
 
         loop {
             batch_number += 1;
-            println!("🔄 Processing batch {} (starting from FID {:?})...", 
-                batch_number, last_fid);
+            println!(
+                "🔄 Processing batch {} (starting from FID {:?})...",
+                batch_number, last_fid
+            );
 
             // Query next batch of missing FIDs
             let missing_fids: Vec<i64> = if let Some(last) = last_fid {
@@ -93,10 +95,12 @@ async fn main() -> Result<()> {
                 break;
             }
 
-            println!("  Found {} FIDs in this batch (FID range: {} - {})", 
-                missing_fids.len(), 
+            println!(
+                "  Found {} FIDs in this batch (FID range: {} - {})",
+                missing_fids.len(),
                 missing_fids.first().unwrap(),
-                missing_fids.last().unwrap());
+                missing_fids.last().unwrap()
+            );
 
             // Process this batch
             let mut batch_success = 0;
@@ -105,9 +109,15 @@ async fn main() -> Result<()> {
 
             for (idx, fid) in missing_fids.iter().enumerate() {
                 if (idx + 1) % 100 == 0 {
-                    println!("    Batch {} progress: {}/{} ({} success, {} errors, {} skipped)", 
-                        batch_number, idx + 1, missing_fids.len(), 
-                        batch_success, batch_error, batch_skipped);
+                    println!(
+                        "    Batch {} progress: {}/{} ({} success, {} errors, {} skipped)",
+                        batch_number,
+                        idx + 1,
+                        missing_fids.len(),
+                        batch_success,
+                        batch_error,
+                        batch_skipped
+                    );
                 }
 
                 match recover_fid(&client, &database, *fid as u64).await {
@@ -135,10 +145,14 @@ async fn main() -> Result<()> {
             total_processed += missing_fids.len();
             last_fid = missing_fids.last().copied();
 
-            println!("  ✅ Batch {} completed: {} success, {} errors, {} skipped", 
-                batch_number, batch_success, batch_error, batch_skipped);
-            println!("  📊 Cumulative totals: {} processed, {} success, {} errors, {} skipped\n",
-                total_processed, success_count, error_count, skipped_count);
+            println!(
+                "  ✅ Batch {} completed: {} success, {} errors, {} skipped",
+                batch_number, batch_success, batch_error, batch_skipped
+            );
+            println!(
+                "  📊 Cumulative totals: {} processed, {} success, {} errors, {} skipped\n",
+                total_processed, success_count, error_count, skipped_count
+            );
 
             // If this batch had fewer than BATCH_SIZE FIDs, we've reached the end
             if missing_fids.len() < BATCH_SIZE as usize {
@@ -153,12 +167,14 @@ async fn main() -> Result<()> {
         println!("  Successfully recovered: {}", success_count);
         println!("  Skipped (already exists or no proofs): {}", skipped_count);
         println!("  Errors: {}", error_count);
-        println!("  Success rate: {:.1}%", 
-            if total_processed > 0 { 
-                (success_count as f64 / total_processed as f64) * 100.0 
-            } else { 
-                0.0 
-            });
+        println!(
+            "  Success rate: {:.1}%",
+            if total_processed > 0 {
+                (success_count as f64 / total_processed as f64) * 100.0
+            } else {
+                0.0
+            }
+        );
     } else {
         println!("Usage:");
         println!("  Single FID: cargo run --bin recover_username_proofs --fid <fid>");
