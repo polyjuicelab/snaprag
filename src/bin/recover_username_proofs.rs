@@ -37,79 +37,128 @@ async fn main() -> Result<()> {
         let fid: u64 = fid_str.parse().expect("Invalid FID");
         recover_fid(&client, &database, fid).await?;
     } else if batch_mode {
-        // Batch mode: find all FIDs missing username_proofs
-        println!("📊 Batch mode: Finding FIDs missing username_proofs...\n");
-
-        let missing_fids: Vec<i64> = sqlx::query_scalar::<_, i64>(
-            r"
-            SELECT DISTINCT up.fid
-            FROM user_profiles up
-            LEFT JOIN username_proofs un ON up.fid = un.fid
-            WHERE un.fid IS NULL
-              AND up.username IS NOT NULL
-            LIMIT 1000
-            ",
-        )
-        .fetch_all(database.pool())
-        .await?;
-
-        println!("Found {} FIDs missing username_proofs", missing_fids.len());
-        if missing_fids.is_empty() {
-            println!("No FIDs need recovery. Exiting.");
-            return Ok(());
-        }
-
-        println!("Starting recovery...\n");
-        println!("⚠️  This may take a while. Progress will be shown every 100 FIDs.\n");
-
+        // Batch mode: process FIDs in batches of 1000, gradually expanding to full dataset
+        println!("📊 Batch mode: Processing FIDs in batches of 1000...\n");
+        
+        const BATCH_SIZE: i64 = 1000;
+        let mut last_fid: Option<i64> = None;
+        let mut batch_number = 0;
+        let mut total_processed = 0;
         let mut success_count = 0;
         let mut error_count = 0;
         let mut skipped_count = 0;
-        let total = missing_fids.len();
 
-        for (idx, fid) in missing_fids.iter().enumerate() {
-            if (idx + 1) % 100 == 0 || idx == 0 {
-                println!(
-                    "Progress: {}/{} ({} success, {} errors, {} skipped)",
-                    idx + 1,
-                    total,
-                    success_count,
-                    error_count,
-                    skipped_count
-                );
+        loop {
+            batch_number += 1;
+            println!("🔄 Processing batch {} (starting from FID {:?})...", 
+                batch_number, last_fid);
+
+            // Query next batch of missing FIDs
+            let missing_fids: Vec<i64> = if let Some(last) = last_fid {
+                sqlx::query_scalar::<_, i64>(
+                    r"
+                    SELECT DISTINCT up.fid
+                    FROM user_profiles up
+                    LEFT JOIN username_proofs un ON up.fid = un.fid
+                    WHERE un.fid IS NULL
+                      AND up.username IS NOT NULL
+                      AND up.fid > $1
+                    ORDER BY up.fid
+                    LIMIT $2
+                    ",
+                )
+                .bind(last)
+                .bind(BATCH_SIZE)
+                .fetch_all(database.pool())
+                .await?
+            } else {
+                sqlx::query_scalar::<_, i64>(
+                    r"
+                    SELECT DISTINCT up.fid
+                    FROM user_profiles up
+                    LEFT JOIN username_proofs un ON up.fid = un.fid
+                    WHERE un.fid IS NULL
+                      AND up.username IS NOT NULL
+                    ORDER BY up.fid
+                    LIMIT $1
+                    ",
+                )
+                .bind(BATCH_SIZE)
+                .fetch_all(database.pool())
+                .await?
+            };
+
+            if missing_fids.is_empty() {
+                println!("✅ No more FIDs to process. All batches completed!\n");
+                break;
             }
 
-            match recover_fid(&client, &database, *fid as u64).await {
-                Ok(true) => success_count += 1,
-                Ok(false) => skipped_count += 1, // Already exists or no proofs found
-                Err(e) => {
-                    error_count += 1;
-                    if error_count <= 10 {
-                        // Only show first 10 errors to avoid spam
-                        eprintln!("  ⚠️  Error recovering FID {}: {}", fid, e);
-                    } else if error_count == 11 {
-                        eprintln!("  ... (suppressing further error messages)");
+            println!("  Found {} FIDs in this batch (FID range: {} - {})", 
+                missing_fids.len(), 
+                missing_fids.first().unwrap(),
+                missing_fids.last().unwrap());
+
+            // Process this batch
+            let mut batch_success = 0;
+            let mut batch_error = 0;
+            let mut batch_skipped = 0;
+
+            for (idx, fid) in missing_fids.iter().enumerate() {
+                if (idx + 1) % 100 == 0 {
+                    println!("    Batch {} progress: {}/{} ({} success, {} errors, {} skipped)", 
+                        batch_number, idx + 1, missing_fids.len(), 
+                        batch_success, batch_error, batch_skipped);
+                }
+
+                match recover_fid(&client, &database, *fid as u64).await {
+                    Ok(true) => {
+                        success_count += 1;
+                        batch_success += 1;
+                    }
+                    Ok(false) => {
+                        skipped_count += 1;
+                        batch_skipped += 1;
+                    }
+                    Err(e) => {
+                        error_count += 1;
+                        batch_error += 1;
+                        if batch_error <= 5 {
+                            eprintln!("    ⚠️  Error recovering FID {}: {}", fid, e);
+                        }
                     }
                 }
+
+                // Rate limiting: small delay to avoid overwhelming the API
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
             }
 
-            // Rate limiting: small delay to avoid overwhelming the API
-            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            total_processed += missing_fids.len();
+            last_fid = missing_fids.last().copied();
+
+            println!("  ✅ Batch {} completed: {} success, {} errors, {} skipped", 
+                batch_number, batch_success, batch_error, batch_skipped);
+            println!("  📊 Cumulative totals: {} processed, {} success, {} errors, {} skipped\n",
+                total_processed, success_count, error_count, skipped_count);
+
+            // If this batch had fewer than BATCH_SIZE FIDs, we've reached the end
+            if missing_fids.len() < BATCH_SIZE as usize {
+                println!("✅ Reached end of missing FIDs. All batches completed!\n");
+                break;
+            }
         }
 
-        println!("\n📋 Recovery Summary:");
-        println!("  Total FIDs processed: {}", total);
+        println!("📋 Final Recovery Summary:");
+        println!("  Total batches processed: {}", batch_number);
+        println!("  Total FIDs processed: {}", total_processed);
         println!("  Successfully recovered: {}", success_count);
         println!("  Skipped (already exists or no proofs): {}", skipped_count);
         println!("  Errors: {}", error_count);
-        println!(
-            "  Success rate: {:.1}%",
-            if total > 0 {
-                (success_count as f64 / total as f64) * 100.0
-            } else {
-                0.0
-            }
-        );
+        println!("  Success rate: {:.1}%", 
+            if total_processed > 0 { 
+                (success_count as f64 / total_processed as f64) * 100.0 
+            } else { 
+                0.0 
+            });
     } else {
         println!("Usage:");
         println!("  Single FID: cargo run --bin recover_username_proofs --fid <fid>");
