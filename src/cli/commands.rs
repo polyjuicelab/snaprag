@@ -199,6 +199,9 @@ pub enum Commands {
     /// Authentication token management commands
     #[command(subcommand)]
     Auth(AuthCommands),
+    /// Utility commands
+    #[command(subcommand)]
+    Utils(UtilsCommands),
 }
 
 #[derive(Subcommand)]
@@ -729,5 +732,14 @@ pub enum AuthCommands {
     Revoke {
         /// Token name to revoke
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum UtilsCommands {
+    /// Get top users by follower count
+    TopUser {
+        /// Number of top users to return
+        limit: i64,
     },
 }

@@ -182,7 +182,9 @@ pub(super) async fn collect_message_data(
             }
         }
         13 => {
-            // FrameAction
+            // FrameAction - NOTE: May be deprecated/abandoned by Farcaster protocol
+            // Recent block analysis (1000 blocks) showed 0 Type 13 messages
+            // Code kept for backward compatibility with historical data
             if let Some(body) = &data.body {
                 frame::handle_frame_action(
                     body,
