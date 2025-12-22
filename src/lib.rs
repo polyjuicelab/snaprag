@@ -264,6 +264,7 @@ impl SnapRag {
                     cast_stats_ttl: std::time::Duration::from_secs(
                         config.cache.cast_stats_ttl_secs,
                     ),
+                    annual_report_ttl: std::time::Duration::from_secs(86400), // 1 day default
                     stale_threshold: std::time::Duration::from_secs(redis_cfg.stale_threshold_secs),
                     enable_stats: config.cache.enable_stats,
                 },
@@ -305,6 +306,7 @@ impl SnapRag {
                     cast_stats_ttl: std::time::Duration::from_secs(
                         config.cache.cast_stats_ttl_secs,
                     ),
+                    annual_report_ttl: std::time::Duration::from_secs(86400), // 1 day default
                     stale_threshold: std::time::Duration::from_secs(redis_cfg.stale_threshold_secs),
                     enable_stats: config.cache.enable_stats,
                 },

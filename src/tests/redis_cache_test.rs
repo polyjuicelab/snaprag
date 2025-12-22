@@ -65,6 +65,7 @@ async fn test_cache_set_and_get_fresh() {
             social_ttl: Duration::from_secs(3600),
             mbti_ttl: Duration::from_secs(7200),
             cast_stats_ttl: Duration::from_secs(86400),
+            annual_report_ttl: Duration::from_secs(86400),
             stale_threshold: Duration::from_secs(300),
             enable_stats: true,
         },
@@ -356,6 +357,7 @@ async fn test_social_cache_stale_while_revalidate() {
             social_ttl: Duration::from_secs(10),  // TTL longer than test wait time
             mbti_ttl: Duration::from_secs(2),
             cast_stats_ttl: Duration::from_secs(10), // TTL longer than test wait time
+            annual_report_ttl: Duration::from_secs(10), // TTL longer than test wait time
             stale_threshold: Duration::from_secs(5), // 5 seconds stale threshold
             enable_stats: true,
         },
