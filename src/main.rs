@@ -405,6 +405,11 @@ async fn main() -> Result<()> {
                 snaprag::cli::handle_auth_revoke(&config, &name)?;
             }
         },
+        Commands::Utils(utils_command) => match utils_command {
+            snaprag::cli::UtilsCommands::TopUser { limit } => {
+                snaprag::cli::handle_top_user_command(&snaprag, limit).await?;
+            }
+        },
         Commands::Fetch(fetch_command) => match fetch_command {
             FetchCommands::User {
                 fid,
