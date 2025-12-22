@@ -44,6 +44,8 @@ pub struct CacheConfig {
     pub mbti_ttl: Duration,
     /// Default TTL for cast statistics cache entries
     pub cast_stats_ttl: Duration,
+    /// Default TTL for annual report cache entries
+    pub annual_report_ttl: Duration,
     /// Stale threshold - deprecated, no longer used (data is permanently stored in Redis)
     /// Kept for API compatibility but not used in TTL calculations
     pub stale_threshold: Duration,
@@ -58,6 +60,7 @@ impl Default for CacheConfig {
             social_ttl: Duration::from_secs(3600),      // 1 hour default
             mbti_ttl: Duration::from_secs(7200),        // 2 hours default (more stable)
             cast_stats_ttl: Duration::from_secs(86400), // 1 day default
+            annual_report_ttl: Duration::from_secs(86400), // 1 day default (annual reports change rarely)
             stale_threshold: Duration::from_secs(0), // Default: no stale threshold (should be set from config in production)
             enable_stats: true,
         }
@@ -481,6 +484,100 @@ impl CacheService {
         Ok(())
     }
 
+    /// Get cached annual report by FID and year
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data deserialization fails.
+    pub async fn get_annual_report(
+        &self,
+        fid: i64,
+        year: u32,
+    ) -> crate::Result<CacheResult<serde_json::Value>> {
+        let cache_key = format!("cache:annual_report:{fid}:{year}");
+        let timestamp_key = format!("cache:annual_report:{fid}:{year}:timestamp");
+
+        let cached_data = self.redis.get_json(&cache_key).await?;
+        let cached_timestamp = self.redis.get_json(&timestamp_key).await?;
+
+        if let (Some(data), Some(timestamp_str)) = (cached_data, cached_timestamp) {
+            if let Ok(timestamp) = timestamp_str.parse::<i64>() {
+                let now = chrono::Utc::now().timestamp();
+                let age = now - timestamp;
+                #[allow(clippy::cast_possible_wrap)] // TTL values are always within i64 range
+                let ttl_secs = self.config.annual_report_ttl.as_secs() as i64;
+
+                if let Ok(report) = serde_json::from_str::<serde_json::Value>(&data) {
+                    if age < ttl_secs {
+                        self.increment_hit().await;
+                        debug!(
+                            "Annual report cache hit (fresh) for FID {} year {}",
+                            fid, year
+                        );
+                        return Ok(CacheResult::Fresh(report));
+                    }
+                    // Expired but data still available in Redis (permanent storage) - return as Updating
+                    self.increment_stale_hit().await;
+                    debug!(
+                        "Annual report cache expired (updating) for FID {} year {}, age: {}s",
+                        fid, year, age
+                    );
+                    return Ok(CacheResult::Updating(report));
+                }
+            }
+        }
+
+        self.increment_miss().await;
+        debug!("Annual report cache miss for FID {} year {}", fid, year);
+        Ok(CacheResult::Miss)
+    }
+
+    /// Cache an annual report response
+    /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data serialization fails.
+    pub async fn set_annual_report(
+        &self,
+        fid: i64,
+        year: u32,
+        report: &serde_json::Value,
+    ) -> crate::Result<()> {
+        let cache_key = format!("cache:annual_report:{fid}:{year}");
+        let timestamp_key = format!("cache:annual_report:{fid}:{year}:timestamp");
+
+        let json_data = serde_json::to_string(report).map_err(|e| {
+            crate::SnapRagError::Custom(format!("Failed to serialize annual report: {e}"))
+        })?;
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+
+        // Set cache permanently (no TTL) - data will only be updated, never deleted
+        self.redis.set_json(&cache_key, &json_data).await?;
+        self.redis.set_json(&timestamp_key, &timestamp).await?;
+
+        debug!(
+            "Cached annual report for FID {} year {} (permanent storage)",
+            fid, year
+        );
+        Ok(())
+    }
+
+    /// Invalidate (delete) cached annual report for a FID and year
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail.
+    pub async fn invalidate_annual_report(&self, fid: i64, year: u32) -> crate::Result<()> {
+        let cache_key = format!("cache:annual_report:{fid}:{year}");
+        let timestamp_key = format!("cache:annual_report:{fid}:{year}:timestamp");
+
+        self.redis.delete(&cache_key).await?;
+        self.redis.delete(&timestamp_key).await?;
+        info!("Deleted annual report cache for FID {} year {}", fid, year);
+        Ok(())
+    }
+
     /// Invalidate (delete) all caches for a FID
     ///
     /// # Errors
@@ -509,6 +606,7 @@ impl CacheService {
             "cache:social:*",
             "cache:mbti:*",
             "cache:cast_stats:*",
+            "cache:annual_report:*",
             "cache:*:timestamp",
             "GET:/api/*",
         ];
