@@ -29,6 +29,16 @@ use crate::text_analysis::extract_nouns;
 use crate::text_analysis::extract_verbs;
 
 /// Get cast statistics for a user
+///
+/// # Errors
+///
+/// Returns `StatusCode::NOT_FOUND` if the user profile is not found.
+/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if database queries or cache operations fail.
+///
+/// # Panics
+///
+/// May panic if date/time parsing fails when normalizing timestamps to day boundaries.
+#[allow(clippy::too_many_lines)]
 pub async fn get_cast_stats(
     State(state): State<AppState>,
     Path(fid): Path<i64>,
@@ -109,11 +119,10 @@ pub async fn get_cast_stats(
 
     if use_cache {
         // Create cache key with date range if specified
-        let cache_key_suffix = if let Some(ref date_range) = date_range_key {
-            format!("{fid}:{date_range}")
-        } else {
-            fid.to_string()
-        };
+        let cache_key_suffix = date_range_key.as_ref().map_or_else(
+            || fid.to_string(),
+            |date_range| format!("{fid}:{date_range}"),
+        );
         let job_key = format!("cast_stats:{cache_key_suffix}");
 
         // Check cache first (with date range support)
@@ -235,7 +244,6 @@ pub async fn get_cast_stats(
                 JobResult::AlreadyExists(status) => {
                     let message = match status.as_str() {
                         "pending" => "Statistics are queued, please check back later",
-                        "processing" => "Statistics in progress, please check back later",
                         "completed" => {
                             // Job completed but cache not updated yet - try to get result from status
                             if let Some(redis_cfg) = &state.config.redis {
@@ -281,13 +289,13 @@ pub async fn get_cast_stats(
     // API receives Unix timestamps, but database stores Farcaster timestamps
     let start_farcaster = normalized_start.map(|unix_ts| {
         // Timestamps are always positive
-        #[allow(clippy::cast_sign_loss)]
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
         let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
         farcaster_ts as i64
     });
     let end_farcaster = normalized_end.map(|unix_ts| {
         // Timestamps are always positive
-        #[allow(clippy::cast_sign_loss)]
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
         let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
         farcaster_ts as i64
     });
@@ -403,6 +411,7 @@ pub fn compute_cast_statistics(casts: &[crate::models::Cast]) -> CastStatsRespon
         for (word, count) in freq_map {
             top_nouns.push(WordFrequency {
                 word,
+                #[allow(clippy::cast_possible_wrap)]
                 count: count as i64,
                 language: lang_code.clone(),
             });
@@ -413,6 +422,7 @@ pub fn compute_cast_statistics(casts: &[crate::models::Cast]) -> CastStatsRespon
         for (word, count) in freq_map {
             top_verbs.push(WordFrequency {
                 word,
+                #[allow(clippy::cast_possible_wrap)]
                 count: count as i64,
                 language: lang_code.clone(),
             });
@@ -433,9 +443,9 @@ pub fn compute_cast_statistics(casts: &[crate::models::Cast]) -> CastStatsRespon
 
     // Convert Farcaster timestamps to Unix timestamps
     // Farcaster timestamps are seconds since Farcaster epoch (Jan 1, 2021)
-    #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)] // Timestamps are always positive
     let start_unix = crate::farcaster_to_unix_timestamp(min_ts as u64) as i64;
-    #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)] // Timestamps are always positive
     let end_unix = crate::farcaster_to_unix_timestamp(max_ts as u64) as i64;
 
     let start_dt = DateTime::<Utc>::from_timestamp(start_unix, 0)
@@ -446,6 +456,7 @@ pub fn compute_cast_statistics(casts: &[crate::models::Cast]) -> CastStatsRespon
         .to_rfc3339();
 
     CastStatsResponse {
+        #[allow(clippy::cast_possible_wrap)]
         total_casts: casts.len() as i64,
         date_range: DateRange {
             start: start_dt,
@@ -468,6 +479,7 @@ fn calculate_date_distribution(casts: &[crate::models::Cast]) -> Vec<DateDistrib
     for cast in casts {
         // Convert Farcaster timestamp to Unix timestamp
         #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
+        #[allow(clippy::cast_possible_wrap)]
         let unix_ts = crate::farcaster_to_unix_timestamp(cast.timestamp as u64) as i64;
 
         // Convert to date
