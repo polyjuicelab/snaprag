@@ -13,6 +13,7 @@ use chrono::Utc;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use super::AppState;
 use crate::api::types::ApiResponse;
@@ -39,6 +40,48 @@ pub async fn get_annual_report(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, StatusCode> {
     let start_time = std::time::Instant::now();
     info!("GET /api/users/{}/annual-report/{}", fid, year);
+
+    // Check cache first
+    match state.cache_service.get_annual_report(fid, year).await {
+        Ok(crate::api::cache::CacheResult::Fresh(cached_report)) => {
+            let duration = start_time.elapsed();
+            info!(
+                "📦 Annual report cache hit (fresh) for FID {} year {} - {}ms",
+                fid,
+                year,
+                duration.as_millis()
+            );
+            return Ok(Json(ApiResponse::success(cached_report)));
+        }
+        Ok(crate::api::cache::CacheResult::Stale(cached_report)) => {
+            // Stale cache - return stale data (annual reports don't change often)
+            info!(
+                "📦 Annual report cache hit (stale) for FID {} year {}",
+                fid, year
+            );
+            let duration = start_time.elapsed();
+            return Ok(Json(ApiResponse::success(cached_report)));
+        }
+        Ok(crate::api::cache::CacheResult::Updating(cached_report)) => {
+            // Cache expired - return old data (annual reports are historical data, so old data is still valid)
+            info!(
+                "🔄 Annual report cache expired (updating) for FID {} year {}, returning cached data",
+                fid, year
+            );
+            let duration = start_time.elapsed();
+            return Ok(Json(ApiResponse::success(cached_report)));
+        }
+        Ok(crate::api::cache::CacheResult::Miss) => {
+            info!("📭 Annual report cache miss for FID {} year {}", fid, year);
+        }
+        Err(e) => {
+            warn!(
+                "Cache lookup error for annual report FID {} year {}: {}",
+                fid, year, e
+            );
+            // Continue with database query on cache error
+        }
+    }
 
     // Calculate time range for the year
     let year_start = DateTime::parse_from_rfc3339(&format!("{year}-01-01T00:00:00Z"))
@@ -100,7 +143,7 @@ pub async fn get_annual_report(
         .flatten();
     let top_reactors = state
         .database
-        .get_top_interactive_users(fid, Some(start_farcaster), Some(end_farcaster), 3)
+        .get_top_interactive_users(fid, Some(start_farcaster), Some(end_farcaster), 10)
         .await
         .unwrap_or_default();
 
@@ -172,10 +215,9 @@ pub async fn get_annual_report(
         .unwrap_or_default();
 
     // Calculate days since registration
+    // registered_at is already a Unix timestamp from block_timestamp field
     let days_since_registration = registered_at.map_or(0, |reg_ts| {
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
-        let reg_unix = crate::farcaster_to_unix_timestamp(reg_ts as u64) as i64;
-        let reg_dt = DateTime::<Utc>::from_timestamp(reg_unix, 0).unwrap_or_else(Utc::now);
+        let reg_dt = DateTime::<Utc>::from_timestamp(reg_ts, 0).unwrap_or_else(Utc::now);
         let now = Utc::now();
         (now - reg_dt).num_days()
     });
@@ -200,11 +242,18 @@ pub async fn get_annual_report(
     for text in &casts_text {
         let freqs = count_emoji_frequencies(text);
         for (emoji, count) in freqs {
-            *emoji_freq.entry(emoji).or_insert(0) += count;
+            // Filter out empty strings (count_emoji_frequencies should already handle this, but double-check)
+            if !emoji.is_empty() {
+                *emoji_freq.entry(emoji).or_insert(0) += count;
+            }
         }
     }
     #[allow(clippy::cast_possible_wrap)]
-    let mut top_emojis: Vec<_> = emoji_freq.into_iter().map(|(e, c)| (e, c as i64)).collect();
+    let mut top_emojis: Vec<_> = emoji_freq
+        .into_iter()
+        .filter(|(e, _)| !e.is_empty()) // Filter out empty strings
+        .map(|(e, c)| (e, c as i64))
+        .collect();
     top_emojis.sort_by(|a, b| b.1.cmp(&a.1));
     top_emojis.truncate(10); // Show top 10 emojis
     debug!("Top emojis count: {}", top_emojis.len());
@@ -322,6 +371,7 @@ pub async fn get_annual_report(
                 "fid": u.fid,
                 "username": u.username,
                 "display_name": u.display_name,
+                "pfp_url": u.pfp_url,
                 "interaction_count": u.interaction_count,
             })).collect::<Vec<_>>(),
         },
@@ -347,6 +397,18 @@ pub async fn get_annual_report(
             })).collect::<Vec<_>>(),
         },
     });
+
+    // Cache the response
+    if let Err(e) = state
+        .cache_service
+        .set_annual_report(fid, year, &response)
+        .await
+    {
+        warn!(
+            "Failed to cache annual report for FID {} year {}: {}",
+            fid, year, e
+        );
+    }
 
     let duration = start_time.elapsed();
     info!(
