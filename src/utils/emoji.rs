@@ -73,9 +73,22 @@ pub fn count_emoji_frequencies(text: &str) -> HashMap<String, usize> {
     let mut frequencies = HashMap::new();
     let emojis = extract_emojis(text);
     for emoji in emojis {
-        *frequencies.entry(emoji).or_insert(0) += 1;
+        // Filter out empty strings and modifier-only characters (variation selectors, zero width joiner)
+        // These are not standalone emojis, they're modifiers used to combine emojis
+        if !emoji.is_empty() && !is_only_modifier(&emoji) {
+            *frequencies.entry(emoji).or_insert(0) += 1;
+        }
     }
     frequencies
+}
+
+/// Check if a string contains only modifier characters (not standalone emojis)
+fn is_only_modifier(s: &str) -> bool {
+    s.chars().all(|c| {
+        let code = c as u32;
+        // Variation Selectors (FE00-FE0F) and Zero Width Joiner (200D) are modifiers
+        matches!(code, 0xFE00..=0xFE0F | 0x200D)
+    })
 }
 
 #[cfg(test)]
@@ -104,5 +117,19 @@ mod tests {
         let text = "Hello world";
         let emojis = extract_emojis(text);
         assert_eq!(emojis.len(), 0);
+    }
+
+    #[test]
+    fn test_filter_empty_strings_and_modifiers() {
+        // Test that empty strings and modifier-only characters are filtered
+        let text = "🔥 Hello \u{FE0F} \u{200D} world 💎";
+        let frequencies = count_emoji_frequencies(text);
+        // Should only contain actual emojis, not modifiers
+        assert!(frequencies.get("🔥").is_some());
+        assert!(frequencies.get("💎").is_some());
+        // Modifiers should not be in the result
+        assert!(frequencies.get("\u{FE0F}").is_none());
+        assert!(frequencies.get("\u{200D}").is_none());
+        assert!(frequencies.get("").is_none());
     }
 }
