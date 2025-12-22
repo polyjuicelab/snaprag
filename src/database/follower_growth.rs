@@ -255,4 +255,51 @@ impl Database {
 
         Ok(snapshots)
     }
+
+    /// Get top users by follower count
+    ///
+    /// Returns the top N users sorted by their current follower count.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` - Maximum number of users to return (default: 1000)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database query fails.
+    pub async fn get_top_users_by_followers(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<(i64, i64, Option<String>)>> {
+        let rows = sqlx::query_as::<_, (i64, i64, Option<String>)>(
+            r"
+            WITH follower_counts AS (
+                SELECT 
+                    l.target_fid as fid,
+                    COUNT(DISTINCT l.fid)::bigint as follower_count
+                FROM (
+                    SELECT DISTINCT ON (fid, target_fid) *
+                    FROM links
+                    WHERE link_type = 'follow'
+                    ORDER BY fid, target_fid, timestamp DESC
+                ) l
+                WHERE l.event_type = 'add'
+                GROUP BY l.target_fid
+            )
+            SELECT 
+                fc.fid,
+                fc.follower_count,
+                up.username
+            FROM follower_counts fc
+            LEFT JOIN user_profiles up ON up.fid = fc.fid
+            ORDER BY fc.follower_count DESC
+            LIMIT $1
+            ",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows)
+    }
 }
