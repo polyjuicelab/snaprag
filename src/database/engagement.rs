@@ -28,6 +28,7 @@ pub struct TopInteractiveUser {
     pub fid: i64,
     pub username: Option<String>,
     pub display_name: Option<String>,
+    pub pfp_url: Option<String>,
     pub interaction_count: i64,
 }
 
@@ -429,6 +430,7 @@ impl Database {
             fid: i64,
             username: Option<String>,
             display_name: Option<String>,
+            pfp_url: Option<String>,
             interaction_count: i64,
         }
 
@@ -439,6 +441,7 @@ impl Database {
                   r.fid,
                   up.username,
                   up.display_name,
+                  up.pfp_url,
                   COUNT(*) as interaction_count
                 FROM reactions r
                 INNER JOIN casts c ON r.target_cast_hash = c.message_hash
@@ -447,7 +450,7 @@ impl Database {
                   AND r.event_type = 'add'
                   AND r.timestamp >= $2 
                   AND r.timestamp <= $3
-                GROUP BY r.fid, up.username, up.display_name
+                GROUP BY r.fid, up.username, up.display_name, up.pfp_url
                 ORDER BY interaction_count DESC
                 LIMIT $4
                 ",
@@ -463,6 +466,7 @@ impl Database {
                   r.fid,
                   up.username,
                   up.display_name,
+                  up.pfp_url,
                   COUNT(*) as interaction_count
                 FROM reactions r
                 INNER JOIN casts c ON r.target_cast_hash = c.message_hash
@@ -470,7 +474,7 @@ impl Database {
                 WHERE c.fid = $1 
                   AND r.event_type = 'add'
                   AND r.timestamp >= $2
-                GROUP BY r.fid, up.username, up.display_name
+                GROUP BY r.fid, up.username, up.display_name, up.pfp_url
                 ORDER BY interaction_count DESC
                 LIMIT $3
                 ",
@@ -485,6 +489,7 @@ impl Database {
                   r.fid,
                   up.username,
                   up.display_name,
+                  up.pfp_url,
                   COUNT(*) as interaction_count
                 FROM reactions r
                 INNER JOIN casts c ON r.target_cast_hash = c.message_hash
@@ -492,7 +497,7 @@ impl Database {
                 WHERE c.fid = $1 
                   AND r.event_type = 'add'
                   AND r.timestamp <= $2
-                GROUP BY r.fid, up.username, up.display_name
+                GROUP BY r.fid, up.username, up.display_name, up.pfp_url
                 ORDER BY interaction_count DESC
                 LIMIT $3
                 ",
@@ -507,13 +512,14 @@ impl Database {
                   r.fid,
                   up.username,
                   up.display_name,
+                  up.pfp_url,
                   COUNT(*) as interaction_count
                 FROM reactions r
                 INNER JOIN casts c ON r.target_cast_hash = c.message_hash
                 LEFT JOIN user_profiles up ON r.fid = up.fid
                 WHERE c.fid = $1 
                   AND r.event_type = 'add'
-                GROUP BY r.fid, up.username, up.display_name
+                GROUP BY r.fid, up.username, up.display_name, up.pfp_url
                 ORDER BY interaction_count DESC
                 LIMIT $2
                 ",
@@ -530,6 +536,7 @@ impl Database {
                 fid: r.fid,
                 username: r.username,
                 display_name: r.display_name,
+                pfp_url: r.pfp_url,
                 interaction_count: r.interaction_count,
             })
             .collect())
