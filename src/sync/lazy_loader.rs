@@ -131,6 +131,11 @@ impl LazyLoader {
         }
     }
 
+    /// Get the snapchain client for direct API access
+    pub fn client(&self) -> &SnapchainClient {
+        &self.snapchain_client
+    }
+
     /// Fetch user profile and casts on demand
     pub async fn fetch_user_complete(&self, fid: u64) -> Result<(UserProfile, Vec<Cast>)> {
         // Check if should load
