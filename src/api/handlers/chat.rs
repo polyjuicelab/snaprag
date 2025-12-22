@@ -55,19 +55,22 @@ fn build_chat_context(
 ) -> String {
     let mut context = String::new();
 
-    context.push_str(&format!(
+    use std::fmt::Write;
+    write!(
+        context,
         "You are role-playing as {}, a Farcaster user",
         profile.display_name.as_deref().unwrap_or("Unknown")
-    ));
+    )
+    .unwrap();
 
     if let Some(username) = &profile.username {
-        context.push_str(&format!(" (username: @{username})"));
+        write!(context, " (username: @{username})").unwrap();
     }
 
-    context.push_str(&format!(". Your FID is {}.\n\n", profile.fid));
+    write!(context, ". Your FID is {}.\n\n", profile.fid).unwrap();
 
     if let Some(bio) = &profile.bio {
-        context.push_str(&format!("Your bio: {bio}\n\n"));
+        write!(context, "Your bio: {bio}\n\n").unwrap();
     }
 
     // Add writing style analysis and examples
@@ -81,13 +84,13 @@ fn build_chat_context(
 
         context.push_str("These are YOUR actual posts. This is HOW YOU WRITE:\n\n");
         for (idx, result) in casts.iter().take(15).enumerate() {
-            context.push_str(&format!("{}. \"{}\"\n", idx + 1, result.text));
+            writeln!(context, "{}. \"{}\"", idx + 1, result.text).unwrap();
         }
 
         context.push_str("\n─────────────────────────────────────────────────────\n");
         context.push_str("📊 STYLE ANALYSIS\n");
         context.push_str("─────────────────────────────────────────────────────\n");
-        context.push_str(&format!("Average length: {avg_length} characters\n\n"));
+        write!(context, "Average length: {avg_length} characters\n\n").unwrap();
 
         context.push_str("🎯 CRITICAL RULES:\n\n");
 
@@ -118,13 +121,13 @@ fn build_chat_context(
     if !session.conversation_history.is_empty() {
         context.push_str("Previous conversation:\n\n");
         for message in &session.conversation_history {
-            context.push_str(&format!("{}: {}\n", message.role, message.content));
+            writeln!(context, "{}: {}", message.role, message.content).unwrap();
         }
         context.push('\n');
     }
 
     context.push_str("═══ THE QUESTION ═══\n\n");
-    context.push_str(&format!("User: {message}\n\n"));
+    write!(context, "User: {message}\n\n").unwrap();
     context.push_str("You (RESPOND IN YOUR EXACT STYLE):");
 
     context

@@ -126,6 +126,9 @@ local/
 !tsconfig*.json
 !Cargo.lock
 
+# All CSV files (generated exports)
+*.csv
+
 # Submodules (should not be managed by git)
 snapchain/
 labels/labels/
