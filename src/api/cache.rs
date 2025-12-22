@@ -120,6 +120,10 @@ impl CacheService {
     }
 
     /// Get cached social analysis by FID with stale-while-revalidate support
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data deserialization fails.
     pub async fn get_social(&self, fid: i64) -> crate::Result<CacheResult<SocialProfile>> {
         let cache_key = self.cache_key("social", fid);
         let timestamp_key = self.timestamp_key("social", fid);
@@ -133,6 +137,7 @@ impl CacheService {
             if let Ok(timestamp) = timestamp_str.parse::<i64>() {
                 let now = chrono::Utc::now().timestamp();
                 let age = now - timestamp;
+                #[allow(clippy::cast_possible_wrap)] // TTL values are always within i64 range
                 let ttl_secs = self.config.social_ttl.as_secs() as i64;
 
                 // Parse cached data
@@ -163,6 +168,10 @@ impl CacheService {
 
     /// Cache a social analysis response
     /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data serialization fails.
     pub async fn set_social(&self, fid: i64, social: &SocialProfile) -> crate::Result<()> {
         let cache_key = self.cache_key("social", fid);
         let timestamp_key = self.timestamp_key("social", fid);
@@ -181,6 +190,10 @@ impl CacheService {
     }
 
     /// Get cached profile by FID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data deserialization fails.
     pub async fn get_profile(&self, fid: i64) -> crate::Result<CacheResult<ProfileResponse>> {
         let cache_key = self.cache_key("profile", fid);
         let timestamp_key = self.timestamp_key("profile", fid);
@@ -192,6 +205,7 @@ impl CacheService {
             if let Ok(timestamp) = timestamp_str.parse::<i64>() {
                 let now = chrono::Utc::now().timestamp();
                 let age = now - timestamp;
+                #[allow(clippy::cast_possible_wrap)] // TTL values are always within i64 range
                 let ttl_secs = self.config.profile_ttl.as_secs() as i64;
 
                 if let Ok(profile) = serde_json::from_str::<ProfileResponse>(&data) {
@@ -217,6 +231,10 @@ impl CacheService {
 
     /// Cache a profile response
     /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data serialization fails.
     pub async fn set_profile(&self, fid: i64, profile: &ProfileResponse) -> crate::Result<()> {
         let cache_key = self.cache_key("profile", fid);
         let timestamp_key = self.timestamp_key("profile", fid);
@@ -235,6 +253,10 @@ impl CacheService {
     }
 
     /// Get cached MBTI analysis by FID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data deserialization fails.
     pub async fn get_mbti(&self, fid: i64) -> crate::Result<CacheResult<MbtiProfile>> {
         let cache_key = self.cache_key("mbti", fid);
         let timestamp_key = self.timestamp_key("mbti", fid);
@@ -246,6 +268,7 @@ impl CacheService {
             if let Ok(timestamp) = timestamp_str.parse::<i64>() {
                 let now = chrono::Utc::now().timestamp();
                 let age = now - timestamp;
+                #[allow(clippy::cast_possible_wrap)] // TTL values are always within i64 range
                 let ttl_secs = self.config.mbti_ttl.as_secs() as i64;
 
                 if let Ok(mbti) = serde_json::from_str::<MbtiProfile>(&data) {
@@ -271,6 +294,10 @@ impl CacheService {
 
     /// Cache an MBTI analysis response
     /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data serialization fails.
     pub async fn set_mbti(&self, fid: i64, mbti: &MbtiProfile) -> crate::Result<()> {
         let cache_key = self.cache_key("mbti", fid);
         let timestamp_key = self.timestamp_key("mbti", fid);
@@ -289,6 +316,10 @@ impl CacheService {
     }
 
     /// Invalidate (delete) cached social analysis for a FID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail.
     pub async fn invalidate_social(&self, fid: i64) -> crate::Result<()> {
         let cache_key = self.cache_key("social", fid);
         let timestamp_key = self.timestamp_key("social", fid);
@@ -300,6 +331,10 @@ impl CacheService {
     }
 
     /// Invalidate (delete) cached profile for a FID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail.
     pub async fn invalidate_profile(&self, fid: i64) -> crate::Result<()> {
         let cache_key = self.cache_key("profile", fid);
         let timestamp_key = self.timestamp_key("profile", fid);
@@ -311,6 +346,10 @@ impl CacheService {
     }
 
     /// Invalidate (delete) cached MBTI analysis for a FID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail.
     pub async fn invalidate_mbti(&self, fid: i64) -> crate::Result<()> {
         let cache_key = self.cache_key("mbti", fid);
         let timestamp_key = self.timestamp_key("mbti", fid);
@@ -322,22 +361,24 @@ impl CacheService {
     }
 
     /// Get cached cast statistics by FID (with optional date range)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data deserialization fails.
     pub async fn get_cast_stats_with_range(
         &self,
         fid: i64,
         date_range: Option<&str>,
     ) -> crate::Result<CacheResult<CastStatsResponse>> {
         // Create cache key with date range if specified
-        let cache_key = if let Some(range) = date_range {
-            format!("cache:cast_stats:{fid}:{range}")
-        } else {
-            self.cache_key("cast_stats", fid)
-        };
-        let timestamp_key = if let Some(range) = date_range {
-            format!("cache:cast_stats:{fid}:{range}:timestamp")
-        } else {
-            self.timestamp_key("cast_stats", fid)
-        };
+        let cache_key = date_range.map_or_else(
+            || self.cache_key("cast_stats", fid),
+            |range| format!("cache:cast_stats:{fid}:{range}"),
+        );
+        let timestamp_key = date_range.map_or_else(
+            || self.timestamp_key("cast_stats", fid),
+            |range| format!("cache:cast_stats:{fid}:{range}:timestamp"),
+        );
 
         let cached_data = self.redis.get_json(&cache_key).await?;
         let cached_timestamp = self.redis.get_json(&timestamp_key).await?;
@@ -346,6 +387,7 @@ impl CacheService {
             if let Ok(timestamp) = timestamp_str.parse::<i64>() {
                 let now = chrono::Utc::now().timestamp();
                 let age = now - timestamp;
+                #[allow(clippy::cast_possible_wrap)] // TTL values are always within i64 range
                 let ttl_secs = self.config.cast_stats_ttl.as_secs() as i64;
 
                 if let Ok(stats) = serde_json::from_str::<CastStatsResponse>(&data) {
@@ -369,12 +411,20 @@ impl CacheService {
     }
 
     /// Get cached cast statistics by FID (backward compatibility)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data deserialization fails.
     pub async fn get_cast_stats(&self, fid: i64) -> crate::Result<CacheResult<CastStatsResponse>> {
         self.get_cast_stats_with_range(fid, None).await
     }
 
     /// Cache a cast statistics response (with optional date range)
     /// Data is stored permanently in Redis (no TTL), expiration is determined by timestamp comparison
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail or data serialization fails.
     pub async fn set_cast_stats_with_range(
         &self,
         fid: i64,
@@ -382,16 +432,14 @@ impl CacheService {
         stats: &CastStatsResponse,
     ) -> crate::Result<()> {
         // Create cache key with date range if specified
-        let cache_key = if let Some(range) = date_range {
-            format!("cache:cast_stats:{fid}:{range}")
-        } else {
-            self.cache_key("cast_stats", fid)
-        };
-        let timestamp_key = if let Some(range) = date_range {
-            format!("cache:cast_stats:{fid}:{range}:timestamp")
-        } else {
-            self.timestamp_key("cast_stats", fid)
-        };
+        let cache_key = date_range.map_or_else(
+            || self.cache_key("cast_stats", fid),
+            |range| format!("cache:cast_stats:{fid}:{range}"),
+        );
+        let timestamp_key = date_range.map_or_else(
+            || self.timestamp_key("cast_stats", fid),
+            |range| format!("cache:cast_stats:{fid}:{range}:timestamp"),
+        );
 
         let json_data = serde_json::to_string(stats).map_err(|e| {
             crate::SnapRagError::Custom(format!("Failed to serialize cast stats: {e}"))
@@ -410,11 +458,19 @@ impl CacheService {
     }
 
     /// Cache a cast statistics response (backward compatibility)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail.
     pub async fn set_cast_stats(&self, fid: i64, stats: &CastStatsResponse) -> crate::Result<()> {
         self.set_cast_stats_with_range(fid, None, stats).await
     }
 
     /// Invalidate (delete) cached cast statistics for a FID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail.
     pub async fn invalidate_cast_stats(&self, fid: i64) -> crate::Result<()> {
         let cache_key = self.cache_key("cast_stats", fid);
         let timestamp_key = self.timestamp_key("cast_stats", fid);
@@ -426,6 +482,10 @@ impl CacheService {
     }
 
     /// Invalidate (delete) all caches for a FID
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail.
     pub async fn invalidate_user(&self, fid: i64) -> crate::Result<()> {
         self.invalidate_profile(fid).await?;
         self.invalidate_social(fid).await?;
@@ -436,6 +496,10 @@ impl CacheService {
     }
 
     /// Delete all cache entries (profile, social, mbti)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if Redis operations fail.
     pub async fn invalidate_all(&self) -> crate::Result<u64> {
         let mut total_deleted = 0u64;
 
