@@ -331,6 +331,7 @@ pub struct TopInteractiveUser {
     pub fid: i64,
     pub username: Option<String>,
     pub display_name: Option<String>,
+    pub pfp_url: Option<String>,
     pub interaction_count: i64,
 }
 

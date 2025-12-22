@@ -109,6 +109,7 @@ pub async fn get_engagement(
                 fid: u.fid,
                 username: u.username,
                 display_name: u.display_name,
+                pfp_url: u.pfp_url,
                 interaction_count: u.interaction_count,
             })
             .collect(),
