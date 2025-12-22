@@ -1,9 +1,18 @@
 use super::super::types::BatchedData;
 /// `FrameAction` message handler
+///
+/// NOTE: FrameAction (MessageType 13) may be deprecated/abandoned by Farcaster protocol.
+/// Recent analysis of 1000+ blocks showed 0 Type 13 messages, while other message types
+/// (LinkAdd, ReactionAdd, CastAdd, etc.) were abundant. This handler is kept for
+/// backward compatibility with historical data.
 use crate::models::ShardBlockInfo;
 use crate::Result;
 
 /// Handle `FrameAction` message (type 13)
+///
+/// # Note
+/// This message type may be deprecated. Recent block analysis found no Type 13 messages
+/// in 1000+ recent blocks across multiple shards.
 pub(super) fn handle_frame_action(
     body: &serde_json::Value,
     fid: i64,

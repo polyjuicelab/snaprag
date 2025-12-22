@@ -1,7 +1,21 @@
+use sha2::Digest;
+use sha2::Sha256;
+
 use super::Database;
 use crate::models::UsernameProof;
 use crate::models::UsernameType;
 use crate::Result;
+
+/// Generate a unique message_hash for recovered username_proofs
+/// Uses a hash of (fid, username_type, username) to ensure uniqueness
+fn generate_recovery_message_hash(fid: i64, username_type: i16, username: &str) -> Vec<u8> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"RECOVERED_USERNAME_PROOF");
+    hasher.update(fid.to_be_bytes());
+    hasher.update(username_type.to_be_bytes());
+    hasher.update(username.as_bytes());
+    hasher.finalize().to_vec()
+}
 
 impl Database {
     /// Create or update username proof
@@ -14,6 +28,9 @@ impl Database {
         signature: Vec<u8>,
         timestamp: i64,
     ) -> Result<UsernameProof> {
+        // Generate unique message_hash before moving username
+        let message_hash = generate_recovery_message_hash(fid, username_type as i16, &username);
+
         let proof = sqlx::query_as::<_, UsernameProof>(
             r"
             INSERT INTO username_proofs (fid, username, username_type, owner, signature, timestamp, message_hash)
@@ -34,7 +51,7 @@ impl Database {
         .bind(owner)
         .bind(signature)
         .bind(timestamp)
-        .bind(vec![0u8; 32]) // Placeholder message_hash
+        .bind(message_hash)
         .fetch_one(&self.pool)
         .await?;
 
