@@ -17,6 +17,11 @@ use crate::api::types::EmojiFrequency;
 use crate::utils::emoji::count_emoji_frequencies;
 
 /// Get content style analysis for a user
+///
+/// # Errors
+///
+/// Returns `StatusCode::NOT_FOUND` if user is not found.
+/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if database query fails.
 pub async fn get_content_style(
     State(state): State<AppState>,
     Path(fid): Path<i64>,
@@ -32,12 +37,16 @@ pub async fn get_content_style(
     let start_farcaster = params.start_timestamp.map(|unix_ts| {
         #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
         let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
-        farcaster_ts as i64
+        #[allow(clippy::cast_possible_wrap)] // Farcaster timestamp fits in i64
+        let farcaster_ts_i64 = farcaster_ts as i64;
+        farcaster_ts_i64
     });
     let end_farcaster = params.end_timestamp.map(|unix_ts| {
         #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
         let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
-        farcaster_ts as i64
+        #[allow(clippy::cast_possible_wrap)] // Farcaster timestamp fits in i64
+        let farcaster_ts_i64 = farcaster_ts as i64;
+        farcaster_ts_i64
     });
 
     // Get casts text for emoji analysis
@@ -72,6 +81,7 @@ pub async fn get_content_style(
         .into_iter()
         .map(|(emoji, count)| EmojiFrequency {
             emoji,
+            #[allow(clippy::cast_possible_wrap)] // Count from usize, safe to cast to i64 for JSON
             count: count as i64,
         })
         .collect();
