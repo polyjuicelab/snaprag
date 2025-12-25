@@ -164,12 +164,6 @@ pub async fn get_annual_report(
         .await
         .ok()
         .flatten();
-    let last_cast = state
-        .database
-        .get_last_cast_in_range(fid, Some(start_farcaster), Some(end_farcaster))
-        .await
-        .ok()
-        .flatten();
 
     // Get content style
     let casts_text = state
@@ -177,15 +171,6 @@ pub async fn get_annual_report(
         .get_casts_text_for_analysis(fid, Some(start_farcaster), Some(end_farcaster))
         .await
         .unwrap_or_default();
-    let frames_used = state
-        .database
-        .get_frame_usage_count(fid, Some(start_farcaster), Some(end_farcaster))
-        .await
-        .unwrap_or(0);
-    debug!(
-        "Frame usage for FID {} in year {}: {} unique frames (timestamp range: {} to {})",
-        fid, year, frames_used, start_farcaster, end_farcaster
-    );
 
     // Get follower growth using database (reverted from API to avoid pagination issues)
     let current_followers = state
@@ -193,19 +178,9 @@ pub async fn get_annual_report(
         .get_current_follower_count(fid)
         .await
         .unwrap_or(0);
-    let current_following = state
-        .database
-        .get_current_following_count(fid)
-        .await
-        .unwrap_or(0);
     let followers_at_start = state
         .database
         .get_follower_count_at_timestamp(fid, start_farcaster)
-        .await
-        .unwrap_or(0);
-    let following_at_start = state
-        .database
-        .get_following_count_at_timestamp(fid, start_farcaster)
         .await
         .unwrap_or(0);
     let monthly_snapshots = state
@@ -228,13 +203,6 @@ pub async fn get_annual_report(
     debug!(
         "Casts in year {} for FID {}: {}",
         year, fid, total_casts_in_year
-    );
-
-    // Get total casts count (all time, not just this year)
-    let total_casts_all_time = state.database.count_casts_by_fid(fid).await.unwrap_or(0);
-    debug!(
-        "Total casts (all time) for FID {}: {}",
-        fid, total_casts_all_time
     );
 
     // Calculate emoji frequencies
@@ -337,14 +305,8 @@ pub async fn get_annual_report(
             "days_since_registration": days_since_registration,
         },
         "activity": {
-            "total_casts": total_casts_all_time,
             "total_casts_in_year": total_casts_in_year,
             "first_cast": first_cast.map(|c| serde_json::json!({
-                "message_hash": hex::encode(c.message_hash),
-                "text": c.text,
-                "timestamp": c.timestamp,
-            })),
-            "last_cast": last_cast.map(|c| serde_json::json!({
                 "message_hash": hex::encode(c.message_hash),
                 "text": c.text,
                 "timestamp": c.timestamp,
@@ -381,19 +343,14 @@ pub async fn get_annual_report(
                 "count": c,
             })).collect::<Vec<_>>(),
             "top_words": top_words,
-            "frames_used": frames_used,
         },
         "social_growth": {
             "current_followers": current_followers,
-            "current_following": current_following,
             "followers_at_start": followers_at_start,
-            "following_at_start": following_at_start,
             "net_growth": current_followers.saturating_sub(followers_at_start),
-            "following_net_growth": current_following.saturating_sub(following_at_start),
             "monthly_snapshots": monthly_snapshots.into_iter().map(|s| serde_json::json!({
                 "month": s.month,
                 "followers": s.followers,
-                "following": s.following,
             })).collect::<Vec<_>>(),
         },
     });

@@ -292,30 +292,16 @@ async fn generate_annual_report(
         .await
         .ok()
         .flatten();
-    let last_cast = database
-        .get_last_cast_in_range(fid, Some(start_farcaster), Some(end_farcaster))
-        .await
-        .ok()
-        .flatten();
 
     // Get content style
     let casts_text = database
         .get_casts_text_for_analysis(fid, Some(start_farcaster), Some(end_farcaster))
         .await
         .unwrap_or_default();
-    let frames_used = database
-        .get_frame_usage_count(fid, Some(start_farcaster), Some(end_farcaster))
-        .await
-        .unwrap_or(0);
 
     // Get follower growth
     let current_followers = database.get_current_follower_count(fid).await.unwrap_or(0);
-    let current_following = database.get_current_following_count(fid).await.unwrap_or(0);
     let followers_at_start = database
-        .get_follower_count_at_timestamp(fid, start_farcaster)
-        .await
-        .unwrap_or(0);
-    let following_at_start = database
         .get_follower_count_at_timestamp(fid, start_farcaster)
         .await
         .unwrap_or(0);
@@ -338,9 +324,6 @@ async fn generate_annual_report(
         "Casts in year {} for FID {}: {}",
         year, fid, total_casts_in_year
     );
-
-    // Get total casts count (all time)
-    let total_casts_all_time = database.count_casts_by_fid(fid).await.unwrap_or(0);
 
     // Calculate emoji frequencies
     let mut emoji_freq: HashMap<String, usize> = HashMap::new();
@@ -435,14 +418,8 @@ async fn generate_annual_report(
             "days_since_registration": days_since_registration,
         },
         "activity": {
-            "total_casts": total_casts_all_time,
             "total_casts_in_year": total_casts_in_year,
             "first_cast": first_cast.map(|c| serde_json::json!({
-                "message_hash": hex::encode(c.message_hash),
-                "text": c.text,
-                "timestamp": c.timestamp,
-            })),
-            "last_cast": last_cast.map(|c| serde_json::json!({
                 "message_hash": hex::encode(c.message_hash),
                 "text": c.text,
                 "timestamp": c.timestamp,
@@ -479,19 +456,14 @@ async fn generate_annual_report(
                 "count": c,
             })).collect::<Vec<_>>(),
             "top_words": top_words,
-            "frames_used": frames_used,
         },
         "social_growth": {
             "current_followers": current_followers,
-            "current_following": current_following,
             "followers_at_start": followers_at_start,
-            "following_at_start": following_at_start,
             "net_growth": current_followers.saturating_sub(followers_at_start),
-            "following_net_growth": current_following.saturating_sub(following_at_start),
             "monthly_snapshots": monthly_snapshots.into_iter().map(|s| serde_json::json!({
                 "month": s.month,
                 "followers": s.followers,
-                "following": s.following,
             })).collect::<Vec<_>>(),
         },
     });
@@ -596,12 +568,6 @@ fn print_summary(report: &serde_json::Value) {
     if let Some(activity) = report.get("activity") {
         if let Some(total) = activity.get("total_casts_in_year") {
             println!("  Total Casts (year): {}", total.as_i64().unwrap_or(0));
-        }
-        if let Some(all_time) = activity.get("total_casts") {
-            println!(
-                "  Total Casts (all time): {}",
-                all_time.as_i64().unwrap_or(0)
-            );
         }
         println!();
     }
