@@ -24,6 +24,39 @@ const ONCHAIN_CHUNK_SIZE: usize = MAX_PARAMS / ONCHAIN_PARAMS_PER_ROW;
 const USERNAME_CHUNK_SIZE: usize = MAX_PARAMS / USERNAME_PARAMS_PER_ROW;
 const FRAME_CHUNK_SIZE: usize = MAX_PARAMS / FRAME_PARAMS_PER_ROW;
 
+/// Extract shard and block information from a vector of items with ShardBlockInfo
+fn extract_shard_block_info<T, F>(items: &[T], extractor: F) -> Option<(u32, u64, u64)>
+where
+    F: Fn(&T) -> &crate::models::ShardBlockInfo,
+{
+    if items.is_empty() {
+        return None;
+    }
+
+    let first_info = extractor(&items[0]);
+    let mut shard_id = first_info.shard_id;
+    let mut min_block = first_info.block_height;
+    let mut max_block = first_info.block_height;
+
+    for item in items {
+        let info = extractor(item);
+        shard_id = info.shard_id; // Assume all items in batch are from same shard
+        min_block = min_block.min(info.block_height);
+        max_block = max_block.max(info.block_height);
+    }
+
+    Some((shard_id, min_block, max_block))
+}
+
+/// Format shard and block info for logging
+fn format_shard_block(shard_id: u32, min_block: u64, max_block: u64) -> String {
+    if min_block == max_block {
+        format!("shard {shard_id}, block {min_block}")
+    } else {
+        format!("shard {shard_id}, blocks {min_block}-{max_block}")
+    }
+}
+
 /// Flush batched data to database
 /// Public for testing, but re-exported through mod.rs
 pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Result<()> {
@@ -193,7 +226,15 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
 
     // Batch insert links (split into chunks to avoid parameter limit)
     if !batched.links.is_empty() {
-        tracing::info!("📎 Batch inserting {} links", batched.links.len());
+        let shard_block_info =
+            extract_shard_block_info(&batched.links, |(_, _, _, _, _, _, info)| info)
+                .map(|(s, min, max)| format_shard_block(s, min, max))
+                .unwrap_or_default();
+        tracing::info!(
+            "📎 Batch inserting {} links ({})",
+            batched.links.len(),
+            shard_block_info
+        );
 
         const PARAMS_PER_ROW: usize = 8; // fid, target_fid, link_type, event_type, timestamp, message_hash, shard_id, block_height
         const MAX_PARAMS: usize = 65000;
@@ -254,7 +295,15 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
 
     // Batch insert reactions (split into chunks to avoid parameter limit)
     if !batched.reactions.is_empty() {
-        tracing::info!("❤️  Batch inserting {} reactions", batched.reactions.len());
+        let shard_block_info =
+            extract_shard_block_info(&batched.reactions, |(_, _, _, _, _, _, _, info)| info)
+                .map(|(s, min, max)| format_shard_block(s, min, max))
+                .unwrap_or_default();
+        tracing::info!(
+            "❤️  Batch inserting {} reactions ({})",
+            batched.reactions.len(),
+            shard_block_info
+        );
 
         const PARAMS_PER_ROW: usize = 10; // fid, target_cast_hash, target_fid, reaction_type, event_type, timestamp, message_hash, shard_id, block_height, transaction_fid
         const MAX_PARAMS: usize = 65000;
@@ -321,9 +370,16 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
 
     // Batch insert verifications (split into chunks to avoid parameter limit)
     if !batched.verifications.is_empty() {
+        let shard_block_info = extract_shard_block_info(
+            &batched.verifications,
+            |(_, _, _, _, _, _, _, _, _, info)| info,
+        )
+        .map(|(s, min, max)| format_shard_block(s, min, max))
+        .unwrap_or_default();
         tracing::info!(
-            "✅ Batch inserting {} verifications",
-            batched.verifications.len()
+            "✅ Batch inserting {} verifications ({})",
+            batched.verifications.len(),
+            shard_block_info
         );
 
         const PARAMS_PER_ROW: usize = 12; // fid, address, claim_signature, block_hash, verification_type, chain_id, event_type, timestamp, message_hash, shard_id, block_height, transaction_fid
@@ -469,9 +525,29 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
 
     // Batch insert onchain events (system messages)
     if !batched.onchain_events.is_empty() {
+        // Extract block range from onchain events (they don't have shard_id)
+        let block_info = if !batched.onchain_events.is_empty() {
+            let first = &batched.onchain_events[0];
+            let block_number = first.3 as u64; // block_number is at index 3
+            let mut min_block = block_number;
+            let mut max_block = block_number;
+            for event in &batched.onchain_events {
+                let block = event.3 as u64;
+                min_block = min_block.min(block);
+                max_block = max_block.max(block);
+            }
+            if min_block == max_block {
+                format!("blocks {min_block}")
+            } else {
+                format!("blocks {min_block}-{max_block}")
+            }
+        } else {
+            String::new()
+        };
         tracing::info!(
-            "⛓️  Batch inserting {} onchain events (before dedup)",
-            batched.onchain_events.len()
+            "⛓️  Batch inserting {} onchain events (before dedup) ({})",
+            batched.onchain_events.len(),
+            block_info
         );
 
         // 🚀 CRITICAL: Deduplicate by (transaction_hash, log_index) composite key
@@ -554,9 +630,14 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
 
     // Batch insert username proofs
     if !batched.username_proofs.is_empty() {
+        let shard_block_info =
+            extract_shard_block_info(&batched.username_proofs, |(_, _, _, _, _, _, _, info)| info)
+                .map(|(s, min, max)| format_shard_block(s, min, max))
+                .unwrap_or_default();
         tracing::info!(
-            "👤 Batch inserting {} username proofs",
-            batched.username_proofs.len()
+            "👤 Batch inserting {} username proofs ({})",
+            batched.username_proofs.len(),
+            shard_block_info
         );
 
         for chunk in batched.username_proofs.chunks(USERNAME_CHUNK_SIZE) {
@@ -621,9 +702,16 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
 
     // Batch insert frame actions
     if !batched.frame_actions.is_empty() {
+        let shard_block_info = extract_shard_block_info(
+            &batched.frame_actions,
+            |(_, _, _, _, _, _, _, _, _, _, info)| info,
+        )
+        .map(|(s, min, max)| format_shard_block(s, min, max))
+        .unwrap_or_default();
         tracing::info!(
-            "🖼️  Batch inserting {} frame actions",
-            batched.frame_actions.len()
+            "🖼️  Batch inserting {} frame actions ({})",
+            batched.frame_actions.len(),
+            shard_block_info
         );
 
         for chunk in batched.frame_actions.chunks(FRAME_CHUNK_SIZE) {
