@@ -313,7 +313,7 @@ async fn handle_mbti_batch(
                     });
                     continue;
                 }
-                Ok(CacheResult::Stale(_)) | Ok(CacheResult::Updating(_)) => {
+                Ok(CacheResult::Stale(_) | CacheResult::Updating(_)) => {
                     info!("Cache expired for FID {fid}, regenerating...");
                 }
                 Ok(CacheResult::Miss) => {
@@ -442,7 +442,7 @@ async fn get_mbti_profile_cached(
             Ok(CacheResult::Fresh(cached_mbti)) => {
                 return Ok(cached_mbti);
             }
-            Ok(CacheResult::Stale(_)) | Ok(CacheResult::Updating(_)) => {
+            Ok(CacheResult::Stale(_) | CacheResult::Updating(_)) => {
                 info!("Cache expired for FID {fid}, regenerating...");
             }
             Ok(CacheResult::Miss) => {
