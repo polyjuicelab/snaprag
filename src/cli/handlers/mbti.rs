@@ -2,6 +2,12 @@
 
 use std::sync::Arc;
 
+use tracing::debug;
+use tracing::info;
+
+use crate::api::cache::CacheResult;
+use crate::api::cache::CacheService;
+use crate::cli::commands::MbtiCommands;
 use crate::cli::output::print_info;
 use crate::cli::output::print_success;
 use crate::cli::output::print_warning;
@@ -243,6 +249,270 @@ pub async fn handle_mbti_analysis(
         let json = serde_json::to_string_pretty(&mbti_profile)?;
         std::fs::write(&export_path, json)?;
         print_success(&format!("✅ Exported analysis to: {export_path}"));
+    }
+
+    Ok(())
+}
+
+/// Handle MBTI commands (batch, stats, search, compatibility)
+pub async fn handle_mbti_command(config: &AppConfig, command: &MbtiCommands) -> Result<()> {
+    match command {
+        MbtiCommands::Batch { fids, output } => {
+            handle_mbti_batch(config, fids.clone(), output.clone()).await?;
+        }
+        MbtiCommands::Stats { output } => {
+            handle_mbti_stats(config, output.clone()).await?;
+        }
+        MbtiCommands::Search { mbti_type, output } => {
+            handle_mbti_search(config, mbti_type.clone(), output.clone()).await?;
+        }
+        MbtiCommands::Compatibility {
+            user1,
+            user2,
+            output,
+        } => {
+            handle_mbti_compatibility(config, user1.clone(), user2.clone(), output.clone()).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Handle MBTI batch analysis
+async fn handle_mbti_batch(
+    config: &AppConfig,
+    fids_str: String,
+    output: Option<String>,
+) -> Result<()> {
+    let database = Arc::new(Database::from_config(config).await?);
+    let cache_service = create_cache_service(config).ok();
+
+    // Parse FIDs
+    let fids: Vec<i64> = fids_str
+        .split(',')
+        .map(|s| s.trim().parse::<i64>())
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(|_| crate::SnapRagError::Custom("Invalid FID format".to_string()))?;
+
+    print_info(&format!(
+        "📊 Batch analyzing MBTI for {} users...",
+        fids.len()
+    ));
+
+    let method = config.mbti.method;
+    let mut results = Vec::new();
+
+    for fid in fids {
+        // Check cache first
+        if let Some(cache) = &cache_service {
+            match cache.get_mbti(fid).await {
+                Ok(CacheResult::Fresh(cached_mbti)) => {
+                    results.push(crate::api::handlers::mbti::MbtiResult {
+                        fid,
+                        mbti_profile: Some(cached_mbti),
+                        error: None,
+                    });
+                    continue;
+                }
+                Ok(CacheResult::Stale(_)) | Ok(CacheResult::Updating(_)) => {
+                    info!("Cache expired for FID {fid}, regenerating...");
+                }
+                Ok(CacheResult::Miss) => {
+                    debug!("Cache miss for FID {fid}");
+                }
+                Err(_) => {}
+            }
+        }
+
+        // Analyze MBTI
+        let analyzer = MbtiAnalyzer::new(Arc::clone(&database));
+        let social_profile = if matches!(method, MbtiMethod::RuleBased | MbtiMethod::Ensemble) {
+            let social_analyzer = SocialGraphAnalyzer::new(Arc::clone(&database));
+            social_analyzer.analyze_user(fid).await.ok()
+        } else {
+            None
+        };
+
+        match analyzer.analyze_mbti(fid, social_profile.as_ref()).await {
+            Ok(mbti_profile) => {
+                // Cache result
+                if let Some(cache) = &cache_service {
+                    let _ = cache.set_mbti(fid, &mbti_profile).await;
+                }
+                results.push(crate::api::handlers::mbti::MbtiResult {
+                    fid,
+                    mbti_profile: Some(mbti_profile),
+                    error: None,
+                });
+            }
+            Err(e) => {
+                results.push(crate::api::handlers::mbti::MbtiResult {
+                    fid,
+                    mbti_profile: None,
+                    error: Some(format!("{e}")),
+                });
+            }
+        }
+    }
+
+    let response = serde_json::json!(results);
+    write_json_output(&response, output.as_ref())
+}
+
+/// Handle MBTI stats
+async fn handle_mbti_stats(config: &AppConfig, output: Option<String>) -> Result<()> {
+    // This would require storing MBTI results in database
+    // For now, return placeholder
+    let response = serde_json::json!({
+        "total_analyzed": 0,
+        "type_distribution": {},
+        "average_confidence": 0.0,
+        "most_common_type": None::<String>,
+    });
+
+    write_json_output(&response, output.as_ref())
+}
+
+/// Handle MBTI search
+async fn handle_mbti_search(
+    config: &AppConfig,
+    mbti_type: String,
+    output: Option<String>,
+) -> Result<()> {
+    // Validate MBTI type
+    let mbti_upper = mbti_type.to_uppercase();
+    if mbti_upper.len() != 4 {
+        return Err(crate::SnapRagError::Custom(
+            "Invalid MBTI type format. Expected 4 letters (e.g., INTJ, ENFP)".to_string(),
+        ));
+    }
+
+    // This would require a database table to store MBTI results
+    // For now, return empty results
+    let response = serde_json::json!([]);
+    write_json_output(&response, output.as_ref())
+}
+
+/// Handle MBTI compatibility
+async fn handle_mbti_compatibility(
+    config: &AppConfig,
+    user1: String,
+    user2: String,
+    output: Option<String>,
+) -> Result<()> {
+    let database = Arc::new(Database::from_config(config).await?);
+    let cache_service = create_cache_service(config).ok();
+
+    let fid1 = parse_user_identifier(&user1, &database).await?;
+    let fid2 = parse_user_identifier(&user2, &database).await?;
+
+    print_info(&format!(
+        "📊 Analyzing MBTI compatibility between FID {fid1} and FID {fid2}..."
+    ));
+
+    let method = config.mbti.method;
+
+    // Get MBTI profiles (with cache support)
+    let mbti1 = get_mbti_profile_cached(&database, &cache_service, fid1 as i64, method).await?;
+    let mbti2 = get_mbti_profile_cached(&database, &cache_service, fid2 as i64, method).await?;
+
+    // Use API handler to get compatibility (it has access to the private function)
+    // For now, we'll create a simplified compatibility response
+    // In a real implementation, we'd need to make calculate_mbti_compatibility public or use the API endpoint
+    let response = serde_json::json!({
+        "fid1": fid1,
+        "fid2": fid2,
+        "mbti_type1": mbti1.mbti_type,
+        "mbti_type2": mbti2.mbti_type,
+        "note": "Full compatibility analysis requires API endpoint access. Use /api/mbti/compatibility/:fid1/:fid2 for detailed analysis.",
+    });
+
+    write_json_output(&response, output.as_ref())
+}
+
+/// Get MBTI profile with cache support
+async fn get_mbti_profile_cached(
+    database: &Arc<Database>,
+    cache_service: &Option<CacheService>,
+    fid: i64,
+    method: MbtiMethod,
+) -> Result<crate::personality::MbtiProfile> {
+    // Check cache first
+    if let Some(cache) = cache_service {
+        match cache.get_mbti(fid).await {
+            Ok(CacheResult::Fresh(cached_mbti)) => {
+                return Ok(cached_mbti);
+            }
+            Ok(CacheResult::Stale(_)) | Ok(CacheResult::Updating(_)) => {
+                info!("Cache expired for FID {fid}, regenerating...");
+            }
+            Ok(CacheResult::Miss) => {
+                debug!("Cache miss for FID {fid}");
+            }
+            Err(_) => {}
+        }
+    }
+
+    // Analyze MBTI
+    let analyzer = MbtiAnalyzer::new(Arc::clone(database));
+    let social_profile = if matches!(method, MbtiMethod::RuleBased | MbtiMethod::Ensemble) {
+        let social_analyzer = SocialGraphAnalyzer::new(Arc::clone(database));
+        social_analyzer.analyze_user(fid).await.ok()
+    } else {
+        None
+    };
+
+    let mbti_profile = analyzer.analyze_mbti(fid, social_profile.as_ref()).await?;
+
+    // Cache result
+    if let Some(cache) = cache_service {
+        let _ = cache.set_mbti(fid, &mbti_profile).await;
+    }
+
+    Ok(mbti_profile)
+}
+
+/// Create cache service from config
+fn create_cache_service(config: &AppConfig) -> Result<crate::api::cache::CacheService> {
+    use std::time::Duration;
+
+    use crate::api::cache::CacheConfig;
+    use crate::api::redis_client::RedisClient;
+
+    let redis_cfg = config
+        .redis
+        .as_ref()
+        .ok_or_else(|| crate::SnapRagError::Custom("Redis not configured".to_string()))?;
+
+    let redis = Arc::new(RedisClient::connect(redis_cfg)?);
+    let cache_config = CacheConfig {
+        profile_ttl: Duration::from_secs(config.cache.profile_ttl_secs),
+        social_ttl: Duration::from_secs(config.cache.social_ttl_secs),
+        mbti_ttl: Duration::from_secs(7200), // 2 hours for MBTI
+        cast_stats_ttl: Duration::from_secs(config.cache.cast_stats_ttl_secs),
+        annual_report_ttl: Duration::from_secs(86400),
+        stale_threshold: Duration::from_secs(redis_cfg.stale_threshold_secs),
+        enable_stats: config.cache.enable_stats,
+    };
+
+    Ok(crate::api::cache::CacheService::with_config(
+        redis,
+        cache_config,
+    ))
+}
+
+/// Write JSON output to file or stdout
+fn write_json_output(data: &serde_json::Value, output: Option<&String>) -> Result<()> {
+    use std::fs::File;
+    use std::io::Write;
+
+    let json_str = serde_json::to_string_pretty(data)?;
+
+    if let Some(path) = output {
+        let mut file = File::create(path)?;
+        file.write_all(json_str.as_bytes())?;
+        print_info(&format!("✅ Results saved to: {path}"));
+    } else {
+        println!("{json_str}");
     }
 
     Ok(())
