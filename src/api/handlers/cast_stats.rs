@@ -288,16 +288,18 @@ pub async fn get_cast_stats(
     // Convert normalized Unix timestamps to Farcaster timestamps for database query
     // API receives Unix timestamps, but database stores Farcaster timestamps
     let start_farcaster = normalized_start.map(|unix_ts| {
-        // Timestamps are always positive
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
+        #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
         let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
-        farcaster_ts as i64
+        #[allow(clippy::cast_possible_wrap)] // Farcaster timestamp fits in i64
+        let farcaster_ts_i64 = farcaster_ts as i64;
+        farcaster_ts_i64
     });
     let end_farcaster = normalized_end.map(|unix_ts| {
-        // Timestamps are always positive
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
+        #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
         let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
-        farcaster_ts as i64
+        #[allow(clippy::cast_possible_wrap)] // Farcaster timestamp fits in i64
+        let farcaster_ts_i64 = farcaster_ts as i64;
+        farcaster_ts_i64
     });
 
     // Query casts from database
