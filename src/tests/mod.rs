@@ -6,6 +6,7 @@ pub mod event_sourcing_test;
 pub mod grpc_shard_chunks_test;
 pub mod integration_sync_test;
 pub mod message_types_test;
+pub mod null_byte_test;
 pub mod rag_integration_test;
 pub mod real_data_test;
 pub mod real_username_proofs_and_frames_test;
