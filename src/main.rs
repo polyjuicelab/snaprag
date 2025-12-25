@@ -11,6 +11,7 @@ use snaprag::cli::FetchCommands;
 use snaprag::cli::RagCommands;
 use snaprag::cli::ServeCommands;
 use snaprag::cli::SyncCommands;
+use snaprag::cli::UserCommands;
 use snaprag::AppConfig;
 use snaprag::Result;
 use snaprag::SnapRag;
@@ -390,6 +391,39 @@ async fn main() -> Result<()> {
             export,
         } => {
             snaprag::cli::handle_mbti_analysis(&config, user, llm, verbose, export).await?;
+        }
+        Commands::MbtiCommands(mbti_command) => {
+            snaprag::cli::handle_mbti_command(&config, &mbti_command).await?;
+        }
+        Commands::AnnualReport {
+            user,
+            csv,
+            year,
+            output,
+            output_dir,
+            force,
+        } => match (user, csv) {
+            (Some(user_ident), None) => {
+                snaprag::cli::handle_annual_report_user(&config, user_ident, year, output, force)
+                    .await?;
+            }
+            (None, Some(csv_path)) => {
+                snaprag::cli::handle_annual_report_csv(&config, csv_path, year, output_dir, force)
+                    .await?;
+            }
+            (Some(_), Some(_)) => {
+                return Err(snaprag::SnapRagError::Custom(
+                    "Cannot use both --user and --csv. Use one or the other.".to_string(),
+                ));
+            }
+            (None, None) => {
+                return Err(snaprag::SnapRagError::Custom(
+                    "Must provide either --user or --csv".to_string(),
+                ));
+            }
+        },
+        Commands::User(user_command) => {
+            snaprag::cli::handle_user_command(&config, &user_command).await?;
         }
         Commands::Cache(cache_command) => {
             snaprag::cli::handle_cache_command(&snaprag, &cache_command).await?;

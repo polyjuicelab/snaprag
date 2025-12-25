@@ -19,6 +19,7 @@
 //! - ask: AI role-playing as a specific user
 //! - index: Database index and autovacuum management
 
+pub mod annual_report;
 pub mod ask;
 pub mod ask_handler;
 pub mod auth;
@@ -36,9 +37,11 @@ pub mod rag;
 pub mod serve;
 pub mod social;
 pub mod sync;
+pub mod user_metrics;
 pub mod utils;
 
 // Re-export all public handlers
+pub use annual_report::*;
 pub use ask::*;
 pub use ask_handler::*;
 pub use auth::*;
@@ -56,4 +59,5 @@ pub use rag::*;
 pub use serve::*;
 pub use social::*;
 pub use sync::*;
+pub use user_metrics::*;
 pub use utils::*;
