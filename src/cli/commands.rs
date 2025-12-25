@@ -193,6 +193,34 @@ pub enum Commands {
         #[arg(short, long)]
         export: Option<String>,
     },
+    /// MBTI-related commands
+    #[command(subcommand)]
+    MbtiCommands(MbtiCommands),
+    /// Generate annual report for user(s)
+    AnnualReport {
+        /// FID or username of the user (e.g., "99" or "@jesse.base.eth")
+        /// If --csv is provided, this is ignored
+        #[arg(short, long)]
+        user: Option<String>,
+        /// CSV file path containing FIDs (last column should be FID)
+        #[arg(long)]
+        csv: Option<String>,
+        /// Year for the annual report
+        #[arg(short, long)]
+        year: u32,
+        /// Output file path (for single user mode only)
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Output directory for CSV batch mode
+        #[arg(long)]
+        output_dir: Option<String>,
+        /// Force regenerate even if cache exists (bypasses cache)
+        #[arg(long)]
+        force: bool,
+    },
+    /// User metrics and analytics commands
+    #[command(subcommand)]
+    User(UserCommands),
     /// Cache management commands
     #[command(subcommand)]
     Cache(CacheCommands),
@@ -741,5 +769,138 @@ pub enum UtilsCommands {
     TopUser {
         /// Number of top users to return
         limit: i64,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum UserCommands {
+    /// Get cast statistics for a user
+    CastStats {
+        /// FID or username of the user (e.g., "99" or "@jesse.base.eth")
+        user: String,
+        /// Start timestamp (Unix seconds, optional)
+        #[arg(long)]
+        start: Option<i64>,
+        /// End timestamp (Unix seconds, optional)
+        #[arg(long)]
+        end: Option<i64>,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Force regenerate even if cache exists (bypasses cache)
+        #[arg(long)]
+        force: bool,
+    },
+    /// Get engagement metrics for a user
+    Engagement {
+        /// FID or username of the user (e.g., "99" or "@jesse.base.eth")
+        user: String,
+        /// Start timestamp (Unix seconds, optional)
+        #[arg(long)]
+        start: Option<i64>,
+        /// End timestamp (Unix seconds, optional)
+        #[arg(long)]
+        end: Option<i64>,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Get temporal activity metrics for a user
+    TemporalActivity {
+        /// FID or username of the user (e.g., "99" or "@jesse.base.eth")
+        user: String,
+        /// Start timestamp (Unix seconds, optional)
+        #[arg(long)]
+        start: Option<i64>,
+        /// End timestamp (Unix seconds, optional)
+        #[arg(long)]
+        end: Option<i64>,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Get content style analysis for a user
+    ContentStyle {
+        /// FID or username of the user (e.g., "99" or "@jesse.base.eth")
+        user: String,
+        /// Start timestamp (Unix seconds, optional)
+        #[arg(long)]
+        start: Option<i64>,
+        /// End timestamp (Unix seconds, optional)
+        #[arg(long)]
+        end: Option<i64>,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Get follower growth metrics for a user
+    FollowerGrowth {
+        /// FID or username of the user (e.g., "99" or "@jesse.base.eth")
+        user: String,
+        /// Start timestamp (Unix seconds, optional)
+        #[arg(long)]
+        start: Option<i64>,
+        /// End timestamp (Unix seconds, optional)
+        #[arg(long)]
+        end: Option<i64>,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Get domain/username status for a user
+    Domains {
+        /// FID or username of the user (e.g., "99" or "@jesse.base.eth")
+        user: String,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Get network statistics and averages
+    NetworkStats {
+        /// Start timestamp (Unix seconds, optional)
+        #[arg(long)]
+        start: Option<i64>,
+        /// End timestamp (Unix seconds, optional)
+        #[arg(long)]
+        end: Option<i64>,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum MbtiCommands {
+    /// Batch analyze multiple users' MBTI types
+    Batch {
+        /// Comma-separated FIDs (e.g., "99,100,101")
+        fids: String,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Get MBTI statistics across all analyzed users
+    Stats {
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Search users by MBTI type
+    Search {
+        /// MBTI type (e.g., "INTJ", "ENFP")
+        mbti_type: String,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Get MBTI compatibility between two users
+    Compatibility {
+        /// First user FID or username
+        user1: String,
+        /// Second user FID or username
+        user2: String,
+        /// Output file path (optional, defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
     },
 }
