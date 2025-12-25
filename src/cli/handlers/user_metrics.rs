@@ -231,7 +231,7 @@ async fn handle_cast_stats(
                     print_info("📦 Using cached cast statistics (fresh)");
                     return write_json_output(&stats_data, output.as_ref());
                 }
-                Ok(CacheResult::Stale(_)) | Ok(CacheResult::Updating(_)) => {
+                Ok(CacheResult::Stale(_) | CacheResult::Updating(_)) => {
                     info!("📦 Cache expired, regenerating cast statistics...");
                 }
                 Ok(CacheResult::Miss) => {
