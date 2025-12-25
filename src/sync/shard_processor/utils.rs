@@ -4,6 +4,33 @@ use super::types::BatchedData;
 use crate::models::ShardBlockInfo;
 use crate::Result;
 
+/// Sanitize a string by removing null bytes (0x00)
+/// PostgreSQL's UTF-8 encoding doesn't allow null bytes in text fields
+/// This function removes all null bytes from the string
+pub fn sanitize_string(s: &Option<String>) -> Option<String> {
+    s.as_ref().map(|text| text.replace('\0', ""))
+}
+
+/// Sanitize a String by removing null bytes
+pub fn sanitize_string_owned(s: String) -> String {
+    s.replace('\0', "")
+}
+
+/// Sanitize a string reference by removing null bytes
+pub fn sanitize_string_ref(s: &str) -> String {
+    s.replace('\0', "")
+}
+
+/// Sanitize a Vec<u8> by removing null bytes (for state field in frame_actions)
+/// This converts the Vec<u8> to a String, removes null bytes, and converts back
+pub fn sanitize_bytes(s: &Option<Vec<u8>>) -> Option<Vec<u8>> {
+    s.as_ref().and_then(|bytes| {
+        String::from_utf8(bytes.clone())
+            .ok()
+            .map(|text| text.replace('\0', "").into_bytes())
+    })
+}
+
 /// Create activity data for batch insertion
 pub(super) fn create_activity(
     fid: i64,
