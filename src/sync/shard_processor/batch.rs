@@ -4,6 +4,9 @@ use std::fmt::Write as _;
 use tracing::warn;
 
 use super::types::BatchedData;
+use super::utils::sanitize_bytes;
+use super::utils::sanitize_string;
+use super::utils::sanitize_string_owned;
 use crate::database::Database;
 use crate::Result;
 
@@ -173,7 +176,7 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
             {
                 q = q
                     .bind(fid)
-                    .bind(text)
+                    .bind(sanitize_string(text)) // Remove null bytes from text
                     .bind(timestamp)
                     .bind(message_hash)
                     .bind(parent_hash)
@@ -455,7 +458,7 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
                 q = q
                     .bind(fid)
                     .bind(field_name)
-                    .bind(value)
+                    .bind(sanitize_string(value)) // Remove null bytes from profile field values
                     .bind(timestamp)
                     .bind(message_hash);
             }
@@ -601,7 +604,7 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
             {
                 q = q
                     .bind(fid)
-                    .bind(username)
+                    .bind(sanitize_string_owned(username.clone())) // Remove null bytes from username
                     .bind(username_type)
                     .bind(owner) // owner is BYTEA, no conversion needed
                     .bind(signature)
@@ -672,12 +675,12 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
             {
                 q = q
                     .bind(fid)
-                    .bind(url)
+                    .bind(sanitize_string_owned(url.clone())) // Remove null bytes from URL
                     .bind(button_index)
                     .bind(cast_hash)
                     .bind(cast_fid)
-                    .bind(input_text)
-                    .bind(state)
+                    .bind(sanitize_string(input_text)) // Remove null bytes from input_text
+                    .bind(sanitize_bytes(state)) // Remove null bytes from state (Vec<u8>)
                     .bind(transaction_id)
                     .bind(timestamp)
                     .bind(message_hash)
