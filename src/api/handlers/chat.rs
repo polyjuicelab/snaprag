@@ -1,4 +1,6 @@
 /// Chat-related API handlers
+use std::fmt::Write;
+
 use axum::extract::Path;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -55,7 +57,6 @@ fn build_chat_context(
 ) -> String {
     let mut context = String::new();
 
-    use std::fmt::Write;
     write!(
         context,
         "You are role-playing as {}, a Farcaster user",
@@ -134,6 +135,12 @@ fn build_chat_context(
 }
 
 /// Create chat session
+///
+/// # Errors
+///
+/// Returns `StatusCode::BAD_REQUEST` if user identifier is invalid.
+/// Returns `StatusCode::NOT_FOUND` if user is not found.
+/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if database query fails.
 pub async fn create_chat_session(
     State(state): State<AppState>,
     Json(req): Json<CreateChatRequest>,
@@ -167,11 +174,14 @@ pub async fn create_chat_session(
     // Count user's casts - optimized query
     #[allow(clippy::cast_possible_wrap)] // FID from session is guaranteed to fit in i64
     #[allow(clippy::cast_sign_loss)] // COUNT result is always non-negative
-    let casts_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM casts WHERE fid = $1")
-        .bind(fid as i64)
-        .fetch_one(state.database.pool())
-        .await
-        .unwrap_or(0) as usize;
+    let casts_count = usize::try_from(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM casts WHERE fid = $1")
+            .bind(fid as i64)
+            .fetch_one(state.database.pool())
+            .await
+            .unwrap_or(0),
+    )
+    .unwrap_or(0);
 
     // Create session
     #[allow(clippy::cast_possible_wrap)] // FID from session is guaranteed to fit in i64
@@ -201,8 +211,15 @@ pub async fn create_chat_session(
 
 /// Send a message in a chat session
 ///
+/// # Errors
+///
+/// Returns `StatusCode::BAD_REQUEST` if session is invalid or expired.
+/// Returns `StatusCode::NOT_FOUND` if user is not found.
+/// Returns `StatusCode::INTERNAL_SERVER_ERROR` if database query or LLM call fails.
+///
 /// # Panics
 /// Panics if the system time is before UNIX_EPOCH (1970-01-01), which is impossible on modern systems
+#[allow(clippy::too_many_lines)] // Complex function requires many lines
 pub async fn send_chat_message(
     State(state): State<AppState>,
     Json(req): Json<ChatMessageRequest>,
@@ -210,11 +227,8 @@ pub async fn send_chat_message(
     info!("POST /api/chat/message - session: {}", req.session_id);
 
     // Get session
-    let mut session = match state.session_manager.get_session(&req.session_id) {
-        Some(s) => s,
-        None => {
-            return Ok(Json(ApiResponse::error("Session not found or expired")));
-        }
+    let Some(mut session) = state.session_manager.get_session(&req.session_id) else {
+        return Ok(Json(ApiResponse::error("Session not found or expired")));
     };
 
     // Get user profile
@@ -282,8 +296,9 @@ pub async fn send_chat_message(
             };
 
             // Ensure text length is at least 1 to avoid ln(0) = -inf
-            let len = text_len.max(1).min(10000); // Clamp to reasonable range
-            let substance = (len as f32).ln().max(1.0).min(10.0); // Clamp ln result
+            let len = text_len.clamp(1, 10000); // Clamp to reasonable range
+            #[allow(clippy::cast_precision_loss)] // Precision loss acceptable for log calculation
+            let substance = (len as f32).ln().clamp(1.0, 10.0); // Clamp ln result
 
             // Ensure recency is valid and clamped
             let rec = if !recency.is_finite() || recency < 0.0 {
@@ -304,7 +319,11 @@ pub async fn send_chat_message(
         }
 
         // Recency factor: newer posts (< 30 days) = 1.0, older (> 1 year) = 0.5
+        #[allow(clippy::cast_precision_loss)]
+        // Precision loss acceptable for time difference calculation
         let age_days_a = ((now - a.timestamp) as f32) / 86400.0;
+        #[allow(clippy::cast_precision_loss)]
+        // Precision loss acceptable for time difference calculation
         let age_days_b = ((now - b.timestamp) as f32) / 86400.0;
         let recency_a = (1.0 - (age_days_a / 365.0).min(0.5)).max(0.5);
         let recency_b = (1.0 - (age_days_b / 365.0).min(0.5)).max(0.5);
@@ -323,9 +342,7 @@ pub async fn send_chat_message(
     let context = build_chat_context(&profile, &user_casts, &session, &req.message);
 
     // Generate response
-    let llm_service = if let Some(llm) = &state.llm_service {
-        llm
-    } else {
+    let Some(llm_service) = &state.llm_service else {
         error!("LLM service not configured");
         return Ok(Json(ApiResponse::error(
             "LLM service not configured".to_string(),
@@ -359,6 +376,10 @@ pub async fn send_chat_message(
 }
 
 /// Get session information
+///
+/// # Errors
+///
+/// Returns `StatusCode::NOT_FOUND` if session is not found.
 pub async fn get_chat_session(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
@@ -380,6 +401,10 @@ pub async fn get_chat_session(
 }
 
 /// Delete chat session
+///
+/// # Errors
+///
+/// Returns `StatusCode::NOT_FOUND` if session is not found.
 pub async fn delete_chat_session(
     State(state): State<AppState>,
     Path(session_id): Path<String>,
