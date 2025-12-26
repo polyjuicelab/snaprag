@@ -16,6 +16,8 @@ use clap::Parser;
 use ethers::prelude::*;
 use ethers::providers::Http;
 use ethers::providers::Provider;
+use ethers::types::Address;
+use ethers::types::U256;
 
 #[derive(Parser)]
 #[command(name = "payment_monitor")]
