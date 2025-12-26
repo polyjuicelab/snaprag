@@ -36,9 +36,9 @@ impl Database {
               FROM links
               WHERE target_fid = $1 
                 AND link_type = 'follow'
+                AND event_type = 'add'
               ORDER BY fid, target_fid, timestamp DESC
             ) l
-            WHERE l.event_type = 'add'
             ",
         )
         .bind(fid)
@@ -68,9 +68,9 @@ impl Database {
               FROM links
               WHERE fid = $1 
                 AND link_type = 'follow'
+                AND event_type = 'add'
               ORDER BY fid, target_fid, timestamp DESC
             ) l
-            WHERE l.event_type = 'add'
             ",
         )
         .bind(fid)
@@ -102,10 +102,10 @@ impl Database {
               FROM links
               WHERE target_fid = $1 
                 AND link_type = 'follow'
+                AND event_type = 'add'
                 AND timestamp <= $2
               ORDER BY fid, target_fid, timestamp DESC
             ) l
-            WHERE l.event_type = 'add'
             ",
         )
         .bind(fid)
@@ -138,10 +138,10 @@ impl Database {
               FROM links
               WHERE fid = $1 
                 AND link_type = 'follow'
+                AND event_type = 'add'
                 AND timestamp <= $2
               ORDER BY fid, target_fid, timestamp DESC
             ) l
-            WHERE l.event_type = 'add'
             ",
         )
         .bind(fid)
@@ -281,9 +281,9 @@ impl Database {
                     SELECT DISTINCT ON (fid, target_fid) *
                     FROM links
                     WHERE link_type = 'follow'
+                        AND event_type = 'add'
                     ORDER BY fid, target_fid, timestamp DESC
                 ) l
-                WHERE l.event_type = 'add'
                 GROUP BY l.target_fid
             )
             SELECT 
