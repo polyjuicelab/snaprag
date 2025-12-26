@@ -97,6 +97,7 @@ async fn test_message_types_quick() {
         99,
         100,
         "follow".to_string(),
+        "add".to_string(), // event_type
         1698765432,
         test_hash_2.clone(),
         shard_info.clone(),
