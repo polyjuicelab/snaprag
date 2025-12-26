@@ -215,9 +215,9 @@ impl Database {
               SELECT DISTINCT ON (fid, target_fid) *
               FROM links
               WHERE link_type = 'follow'
+                AND event_type = 'add'
               ORDER BY fid, target_fid, timestamp DESC
             ) l
-            WHERE l.event_type = 'add'
             ",
         )
         .fetch_one(&self.pool)
