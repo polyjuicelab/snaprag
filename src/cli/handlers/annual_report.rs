@@ -37,10 +37,27 @@ pub async fn handle_annual_report_user(
     output: Option<String>,
     force: bool,
 ) -> Result<()> {
+    info!("🔧 Initializing database connection...");
     let database = Arc::new(Database::from_config(config).await?);
+    info!("✅ Database connection established");
 
     // Initialize cache service if Redis is configured
-    let cache_service = create_cache_service(config).ok();
+    info!("🔧 Checking Redis configuration...");
+    let cache_service = if config.redis.is_some() {
+        match create_cache_service(config) {
+            Ok(service) => {
+                info!("✅ Redis cache service initialized");
+                Some(service)
+            }
+            Err(e) => {
+                info!("⚠️ Failed to initialize Redis cache service: {}", e);
+                None
+            }
+        }
+    } else {
+        info!("⚠️ Redis not configured, cache will be disabled");
+        None
+    };
 
     // Parse user identifier
     let fid = parse_user_identifier(&user_identifier, &database).await?;
@@ -83,10 +100,27 @@ pub async fn handle_annual_report_csv(
     output_dir: Option<String>,
     force: bool,
 ) -> Result<()> {
+    info!("🔧 Initializing database connection...");
     let database = Arc::new(Database::from_config(config).await?);
+    info!("✅ Database connection established");
 
     // Initialize cache service if Redis is configured
-    let cache_service = create_cache_service(config).ok();
+    info!("🔧 Checking Redis configuration...");
+    let cache_service = if config.redis.is_some() {
+        match create_cache_service(config) {
+            Ok(service) => {
+                info!("✅ Redis cache service initialized");
+                Some(service)
+            }
+            Err(e) => {
+                info!("⚠️ Failed to initialize Redis cache service: {}", e);
+                None
+            }
+        }
+    } else {
+        info!("⚠️ Redis not configured, cache will be disabled");
+        None
+    };
 
     print_info(&format!("📂 Reading CSV file: {csv_path}"));
     let fids = read_fids_from_csv(&csv_path)?;
@@ -155,7 +189,7 @@ fn create_cache_service(config: &AppConfig) -> Result<CacheService> {
         social_ttl: Duration::from_secs(config.cache.social_ttl_secs),
         mbti_ttl: Duration::from_secs(7200), // 2 hours for MBTI
         cast_stats_ttl: Duration::from_secs(config.cache.cast_stats_ttl_secs),
-        annual_report_ttl: Duration::from_secs(86400), // 1 day default
+        annual_report_ttl: Duration::from_secs(0), // Never expire (permanent)
         stale_threshold: Duration::from_secs(redis_cfg.stale_threshold_secs),
         enable_stats: config.cache.enable_stats,
     };
@@ -181,6 +215,7 @@ async fn generate_annual_report(
     // Check cache first if available and not forcing
     if !force {
         if let Some(cache) = cache_service {
+            info!("🔍 Checking Redis cache for FID {} year {}...", fid, year);
             match cache.get_annual_report(fid, year).await {
                 Ok(CacheResult::Fresh(cached_report)) => {
                     let duration = start_time.elapsed();
@@ -207,20 +242,25 @@ async fn generate_annual_report(
                     // Continue to generate new report and update cache
                 }
                 Ok(CacheResult::Miss) => {
-                    debug!("📭 Annual report cache miss for FID {} year {}", fid, year);
+                    info!(
+                        "📭 Annual report cache miss for FID {} year {}, querying database...",
+                        fid, year
+                    );
                 }
                 Err(e) => {
-                    debug!(
-                        "Cache lookup error for annual report FID {} year {}: {}",
+                    info!(
+                        "⚠️ Cache lookup error for annual report FID {} year {}: {}, falling back to database",
                         fid, year, e
                     );
                     // Continue with database query on cache error
                 }
             }
+        } else {
+            info!("📭 Cache service not available, querying database directly...");
         }
     } else {
         info!(
-            "🔄 Force mode: bypassing cache for FID {} year {}",
+            "🔄 Force mode: bypassing cache for FID {} year {}, querying database...",
             fid, year
         );
     }
@@ -245,17 +285,31 @@ async fn generate_annual_report(
     );
 
     // Get user profile
+    info!("📊 [FID {}] Querying database: user profile...", fid);
     let profile = database
         .get_user_profile(fid)
         .await?
         .ok_or_else(|| crate::SnapRagError::Custom(format!("User {fid} not found")))?;
+    info!(
+        "✅ [FID {}] User profile retrieved: @{}",
+        fid,
+        profile.username.as_deref().unwrap_or("unknown")
+    );
 
+    info!(
+        "📊 [FID {}] Querying database: registration timestamp...",
+        fid
+    );
     let registered_at = database
         .get_registration_timestamp(fid)
         .await
         .unwrap_or(None);
 
     // Get engagement metrics
+    info!(
+        "📊 [FID {}] Querying database: engagement metrics (reactions, recasts, replies)...",
+        fid
+    );
     let reactions_received = database
         .get_reactions_received(fid, Some(start_farcaster), Some(end_farcaster), 1)
         .await
@@ -268,17 +322,29 @@ async fn generate_annual_report(
         .get_replies_received(fid, Some(start_farcaster), Some(end_farcaster))
         .await
         .unwrap_or(0);
+    info!(
+        "✅ [FID {}] Engagement: {} reactions, {} recasts, {} replies",
+        fid, reactions_received, recasts_received, replies_received
+    );
+
+    info!("📊 [FID {}] Querying database: most popular cast...", fid);
     let most_popular_cast = database
         .get_most_popular_cast(fid, Some(start_farcaster), Some(end_farcaster))
         .await
         .ok()
         .flatten();
+
+    info!("📊 [FID {}] Querying database: top reactors...", fid);
     let top_reactors = database
         .get_top_interactive_users(fid, Some(start_farcaster), Some(end_farcaster), 10)
         .await
         .unwrap_or_default();
 
     // Get temporal activity
+    info!(
+        "📊 [FID {}] Querying database: temporal activity (hourly/monthly distribution)...",
+        fid
+    );
     let hourly_dist = database
         .get_hourly_distribution(fid, Some(start_farcaster), Some(end_farcaster))
         .await
@@ -294,12 +360,25 @@ async fn generate_annual_report(
         .flatten();
 
     // Get content style
+    info!(
+        "📊 [FID {}] Querying database: cast texts for content analysis...",
+        fid
+    );
     let casts_text = database
         .get_casts_text_for_analysis(fid, Some(start_farcaster), Some(end_farcaster))
         .await
         .unwrap_or_default();
+    info!(
+        "✅ [FID {}] Retrieved {} casts for content analysis",
+        fid,
+        casts_text.len()
+    );
 
     // Get follower growth
+    info!(
+        "📊 [FID {}] Querying database: follower growth metrics...",
+        fid
+    );
     let current_followers = database.get_current_follower_count(fid).await.unwrap_or(0);
     let followers_at_start = database
         .get_follower_count_at_timestamp(fid, start_farcaster)
@@ -309,6 +388,13 @@ async fn generate_annual_report(
         .get_monthly_follower_snapshots(fid, Some(start_farcaster), Some(end_farcaster))
         .await
         .unwrap_or_default();
+    info!(
+        "✅ [FID {}] Followers: {} (start) -> {} (current), {} snapshots",
+        fid,
+        followers_at_start,
+        current_followers,
+        monthly_snapshots.len()
+    );
 
     // Calculate days since registration
     let days_since_registration = registered_at.map_or(0, |reg_ts| {
@@ -470,19 +556,17 @@ async fn generate_annual_report(
 
     // Cache the response if cache service is available
     if let Some(cache) = cache_service {
+        info!("💾 [FID {}] Saving annual report to Redis cache...", fid);
         if let Err(e) = cache.set_annual_report(fid, year, &response).await {
-            debug!(
-                "Failed to cache annual report for FID {} year {}: {}",
-                fid, year, e
-            );
+            info!("⚠️ [FID {}] Failed to cache annual report: {}", fid, e);
         } else {
-            debug!("Cached annual report for FID {} year {}", fid, year);
+            info!("✅ [FID {}] Annual report cached successfully", fid);
         }
     }
 
     let duration = start_time.elapsed();
     info!(
-        "Generated annual report for FID {} year {} in {:?}",
+        "✅ [FID {}] Generated annual report for year {} in {:?}",
         fid, year, duration
     );
 
