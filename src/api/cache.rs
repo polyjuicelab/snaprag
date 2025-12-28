@@ -60,7 +60,7 @@ impl Default for CacheConfig {
             social_ttl: Duration::from_secs(3600),      // 1 hour default
             mbti_ttl: Duration::from_secs(7200),        // 2 hours default (more stable)
             cast_stats_ttl: Duration::from_secs(86400), // 1 day default
-            annual_report_ttl: Duration::from_secs(86400), // 1 day default (annual reports change rarely)
+            annual_report_ttl: Duration::from_secs(0),  // 0 = never expire (permanent) by default
             stale_threshold: Duration::from_secs(0), // Default: no stale threshold (should be set from config in production)
             enable_stats: true,
         }
@@ -508,7 +508,8 @@ impl CacheService {
                 let ttl_secs = self.config.annual_report_ttl.as_secs() as i64;
 
                 if let Ok(report) = serde_json::from_str::<serde_json::Value>(&data) {
-                    if age < ttl_secs {
+                    // If TTL is 0, never expire (permanent cache)
+                    if ttl_secs == 0 || age < ttl_secs {
                         self.increment_hit().await;
                         debug!(
                             "Annual report cache hit (fresh) for FID {} year {}",
