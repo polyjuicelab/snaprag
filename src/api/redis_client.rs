@@ -1,6 +1,8 @@
 use std::time::Duration;
 
 use redis::AsyncCommands;
+use tracing::info;
+use tracing::warn;
 
 use crate::config::RedisConfig;
 
@@ -15,8 +17,42 @@ pub struct RedisClient {
 
 impl RedisClient {
     pub fn connect(config: &RedisConfig) -> crate::Result<Self> {
-        let client = redis::Client::open(config.url.as_str())
-            .map_err(|e| crate::SnapRagError::Custom(format!("Redis open error: {e}")))?;
+        // Mask password in URL for logging (if present)
+        let log_url = if config.url.contains('@') {
+            // URL contains authentication, mask password
+            if let Some(at_pos) = config.url.find('@') {
+                if let Some(scheme_end) = config.url.find("://") {
+                    let scheme_part = &config.url[..scheme_end + 3];
+                    let after_scheme = &config.url[scheme_end + 3..at_pos];
+                    let rest = &config.url[at_pos..];
+                    if let Some(colon_pos) = after_scheme.find(':') {
+                        format!("{}{}:***{}", scheme_part, &after_scheme[..colon_pos], rest)
+                    } else {
+                        format!("{}{}{}", scheme_part, after_scheme, rest)
+                    }
+                } else {
+                    config.url.clone()
+                }
+            } else {
+                config.url.clone()
+            }
+        } else {
+            config.url.clone()
+        };
+
+        info!("🔧 Initializing Redis client...");
+        info!("  Redis URL: {}", log_url);
+        info!("  Namespace: {}", config.namespace);
+        info!("  Default TTL: {} seconds", config.default_ttl_secs);
+        info!("  Stale threshold: {} seconds", config.stale_threshold_secs);
+
+        let client = redis::Client::open(config.url.as_str()).map_err(|e| {
+            let error_msg = format!("Redis open error: {e}");
+            warn!("❌ Failed to open Redis client: {}", error_msg);
+            crate::SnapRagError::Custom(error_msg)
+        })?;
+
+        info!("✅ Redis client opened successfully");
 
         Ok(Self {
             client,

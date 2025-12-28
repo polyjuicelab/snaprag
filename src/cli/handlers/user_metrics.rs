@@ -89,7 +89,7 @@ fn create_cache_service(config: &AppConfig) -> Result<CacheService> {
         social_ttl: Duration::from_secs(config.cache.social_ttl_secs),
         mbti_ttl: Duration::from_secs(7200), // 2 hours for MBTI
         cast_stats_ttl: Duration::from_secs(config.cache.cast_stats_ttl_secs),
-        annual_report_ttl: Duration::from_secs(86400), // 1 day default
+        annual_report_ttl: Duration::from_secs(0), // Never expire (permanent)
         stale_threshold: Duration::from_secs(redis_cfg.stale_threshold_secs),
         enable_stats: config.cache.enable_stats,
     };
