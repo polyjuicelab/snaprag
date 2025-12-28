@@ -139,18 +139,48 @@ impl Database {
     /// # }
     /// ```
     pub async fn from_config(config: &crate::config::AppConfig) -> Result<Self> {
+        use tracing::info;
+
+        // Mask password in database URL for logging
+        let db_url = config.database_url();
+        let log_url = if db_url.contains('@') {
+            // URL contains authentication, mask password
+            if let Some(at_pos) = db_url.find('@') {
+                if let Some(scheme_end) = db_url.find("://") {
+                    let scheme_part = &db_url[..scheme_end + 3];
+                    let after_scheme = &db_url[scheme_end + 3..at_pos];
+                    let rest = &db_url[at_pos..];
+                    if let Some(colon_pos) = after_scheme.find(':') {
+                        format!("{}{}:***{}", scheme_part, &after_scheme[..colon_pos], rest)
+                    } else {
+                        format!("{}{}{}", scheme_part, after_scheme, rest)
+                    }
+                } else {
+                    db_url.to_string()
+                }
+            } else {
+                db_url.to_string()
+            }
+        } else {
+            db_url.to_string()
+        };
+
+        info!("  Database URL: {}", log_url);
+        info!("  Max connections: {}", config.max_connections());
+        info!("  Min connections: {}", config.min_connections());
+        info!(
+            "  Connection timeout: {} seconds",
+            config.connection_timeout()
+        );
+
         let pool_options = sqlx::postgres::PgPoolOptions::new()
             .max_connections(config.max_connections())
             .min_connections(config.min_connections())
             .acquire_timeout(std::time::Duration::from_secs(config.connection_timeout()));
 
-        let pool = pool_options.connect(config.database_url()).await?;
+        let pool = pool_options.connect(db_url).await?;
 
-        tracing::debug!(
-            "Database pool configured: max_connections={}, min_connections={}",
-            config.max_connections(),
-            config.min_connections()
-        );
+        info!("✅ Database connection pool established successfully");
 
         Ok(Self::new(pool))
     }
