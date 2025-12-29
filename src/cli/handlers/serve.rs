@@ -322,26 +322,26 @@ pub async fn handle_serve_worker(
                         // Process the job we got
                         let job_start_time = std::time::Instant::now();
                         info!(
-                            "Worker {}: ✅ Received job {} from queue '{}' (started at {:?})",
-                            worker_id, job_id, queue_name, job_start_time
+                            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                         );
-                        debug!("Worker {}: Job data: {}", worker_id, job_data);
+                        info!(
+                            "Worker {}: 📥 RECEIVED JOB from queue '{}'",
+                            worker_id, queue_name
+                        );
+                        info!("  Job ID: {}", job_id);
+                        debug!("  Raw job data: {}", job_data);
 
                         // Parse job data
                         let parse_start = std::time::Instant::now();
                         let job: serde_json::Value = match serde_json::from_str(&job_data) {
                             Ok(j) => {
                                 let parse_duration = parse_start.elapsed();
-                                debug!(
-                                    "Worker {}: Parsed job data in {}ms",
-                                    worker_id,
-                                    parse_duration.as_millis()
-                                );
+                                debug!("  Parsed job data in {}ms", parse_duration.as_millis());
                                 j
                             }
                             Err(e) => {
                                 error!(
-                                    "Worker {}: Failed to parse job data: {} (took {}ms)",
+                                    "Worker {}: ❌ Failed to parse job data: {} (took {}ms)",
                                     worker_id,
                                     e,
                                     parse_start.elapsed().as_millis()
@@ -379,8 +379,8 @@ pub async fn handle_serve_worker(
                                         format!("{job_type}:{fid}:{y}")
                                     } else {
                                         error!(
-                                            "Worker {}: Missing year for annual_report job",
-                                            worker_id
+                                            "Worker {}: ❌ Missing year for annual_report job (FID: {})",
+                                            worker_id, fid
                                         );
                                         continue; // Skip this job
                                     }
@@ -388,7 +388,36 @@ pub async fn handle_serve_worker(
                                     format!("{job_type}:{fid}")
                                 };
 
+                                // Log job details clearly
+                                info!("  Job Type: {}", job_type);
+                                info!("  FID: {}", fid);
+                                if let Some(y) = year {
+                                    info!("  Year: {}", y);
+                                }
+                                info!("  Job Key: {}", job_key);
+                                info!("  Started at: {:?}", job_start_time);
+
+                                // Check if job is already failed or cancelled before processing
+                                if let Ok(Some((status, _))) =
+                                    redis_clone.get_job_status(&job_key).await
+                                {
+                                    if status == "failed" || status == "cancelled" {
+                                        warn!(
+                                            "Worker {}: ⚠️  SKIPPING job {} - Status: {} (job already completed/failed)",
+                                            worker_id, job_key, status
+                                        );
+                                        // Mark as inactive and continue to next job
+                                        let _ = redis_clone.mark_job_inactive(&job_key).await;
+                                        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                                        continue;
+                                    }
+                                    info!("  Current Status: {} (updating to processing)", status);
+                                } else {
+                                    info!("  Current Status: pending (updating to processing)");
+                                }
+
                                 // Update status to processing
+                                info!("  → Updating status to 'processing'...");
                                 let status_update_start = std::time::Instant::now();
                                 if let Err(e) = redis_clone
                                     .set_job_status(&job_key, "processing", None)
@@ -413,8 +442,8 @@ pub async fn handle_serve_worker(
                                 match job_type {
                                     "social" => {
                                         info!(
-                                            "Worker {}: Analyzing social graph for FID {} (started at {:?})",
-                                            worker_id, fid, analysis_start
+                                            "Worker {}: 🔍 Processing SOCIAL graph analysis for FID {}",
+                                            worker_id, fid
                                         );
                                         let analyzer =
                                             crate::social_graph::SocialGraphAnalyzer::new(
@@ -553,9 +582,9 @@ pub async fn handle_serve_worker(
                                     }
                                     "mbti" => {
                                         info!(
-                                    "Worker {}: Analyzing MBTI for FID {} (started at {:?})",
-                                    worker_id, fid, analysis_start
-                                );
+                                            "Worker {}: 🔍 Processing MBTI analysis for FID {}",
+                                            worker_id, fid
+                                        );
 
                                         // Get config from state (we need to pass it through or reconstruct)
                                         // For now, we'll use default config - this should be improved to pass config through
@@ -726,8 +755,8 @@ pub async fn handle_serve_worker(
                                     }
                                     "cast_stats" => {
                                         info!(
-                                            "Worker {}: Computing cast statistics for FID {} (started at {:?})",
-                                            worker_id, fid, analysis_start
+                                            "Worker {}: 🔍 Processing CAST STATISTICS for FID {}",
+                                            worker_id, fid
                                         );
 
                                         // Query casts from database (no time range filter for cached stats)
@@ -906,8 +935,8 @@ pub async fn handle_serve_worker(
                                         match year {
                                             Ok(year) => {
                                                 info!(
-                                                    "Worker {}: Generating annual report for FID {} year {} (started at {:?})",
-                                                    worker_id, fid, year, analysis_start
+                                                    "Worker {}: 🔍 Processing ANNUAL REPORT for FID {} year {}",
+                                                    worker_id, fid, year
                                                 );
 
                                                 // Create cache service
