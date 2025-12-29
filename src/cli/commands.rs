@@ -230,6 +230,9 @@ pub enum Commands {
     /// Utility commands
     #[command(subcommand)]
     Utils(UtilsCommands),
+    /// Task management commands
+    #[command(subcommand)]
+    Task(TaskCommands),
 }
 
 #[derive(Subcommand)]
@@ -866,6 +869,30 @@ pub enum UserCommands {
         /// Output file path (optional, defaults to stdout)
         #[arg(short, long)]
         output: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum TaskCommands {
+    /// List all tasks (jobs) with their execution status
+    List {
+        /// Queue name to filter by (optional)
+        #[arg(long)]
+        queue: Option<String>,
+        /// Show only tasks with specific status (pending, processing, completed, failed)
+        #[arg(long)]
+        status: Option<String>,
+        /// Maximum number of tasks to show
+        #[arg(short, long, default_value = "100")]
+        limit: usize,
+    },
+    /// Stop a task by its job key (format: type:fid or type:fid:year for annual_report)
+    Stop {
+        /// Job key to stop (e.g., "social:66" or "annual_report:66:2024")
+        job_key: String,
+        /// Force stop even if task is processing
+        #[arg(short, long)]
+        force: bool,
     },
 }
 
