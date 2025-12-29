@@ -364,8 +364,29 @@ pub async fn handle_serve_worker(
 
                         match fid {
                             Ok(fid) => {
-                                // Construct job key from job type and FID
-                                let job_key = format!("{job_type}:{fid}");
+                                // Extract year for annual_report jobs
+                                let year = if job_type == "annual_report" {
+                                    job.get("year")
+                                        .and_then(serde_json::Value::as_u64)
+                                        .map(|y| y as u32)
+                                } else {
+                                    None
+                                };
+
+                                // Construct job key from job type, FID, and optionally year
+                                let job_key = if job_type == "annual_report" {
+                                    if let Some(y) = year {
+                                        format!("{job_type}:{fid}:{y}")
+                                    } else {
+                                        error!(
+                                            "Worker {}: Missing year for annual_report job",
+                                            worker_id
+                                        );
+                                        continue; // Skip this job
+                                    }
+                                } else {
+                                    format!("{job_type}:{fid}")
+                                };
 
                                 // Update status to processing
                                 let status_update_start = std::time::Instant::now();
@@ -846,6 +867,181 @@ pub async fn handle_serve_worker(
                                                 error!(
                                                     "Worker {}: Failed to fetch casts for FID {}: {}",
                                                     worker_id, fid, e
+                                                );
+
+                                                // Update job status to failed
+                                                if let Err(update_err) = redis_clone
+                                                    .set_job_status(
+                                                        &job_key,
+                                                        "failed",
+                                                        Some(&format!("{e}")),
+                                                    )
+                                                    .await
+                                                {
+                                                    warn!(
+                                                        "Worker {}: Failed to update job status: {}",
+                                                        worker_id, update_err
+                                                    );
+                                                }
+
+                                                // Mark job as inactive
+                                                if let Err(e) =
+                                                    redis_clone.mark_job_inactive(&job_key).await
+                                                {
+                                                    warn!(
+                                                        "Worker {}: Failed to mark job inactive: {}",
+                                                        worker_id, e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    "annual_report" => {
+                                        let year = year.ok_or_else(|| {
+                                            crate::SnapRagError::Custom(
+                                                "Missing year for annual_report job".to_string(),
+                                            )
+                                        });
+
+                                        match year {
+                                            Ok(year) => {
+                                                info!(
+                                                    "Worker {}: Generating annual report for FID {} year {} (started at {:?})",
+                                                    worker_id, fid, year, analysis_start
+                                                );
+
+                                                // Create cache service
+                                                let cache_service =
+                                                    crate::api::cache::CacheService::with_config(
+                                                        redis_clone.clone(),
+                                                        crate::api::cache::CacheConfig::default(),
+                                                    );
+
+                                                // Generate annual report (force=false to respect cache)
+                                                let result = crate::cli::handlers::annual_report::generate_annual_report(
+                                                    &database_clone,
+                                                    Some(&cache_service),
+                                                    fid,
+                                                    year,
+                                                    false, // Don't force, respect cache
+                                                )
+                                                .await;
+                                                let analysis_duration = analysis_start.elapsed();
+
+                                                match &result {
+                                                    Ok(_) => {
+                                                        info!(
+                                                            "Worker {}: Annual report generation completed for FID {} year {} in {}ms ({}s)",
+                                                            worker_id, fid, year, analysis_duration.as_millis(), analysis_duration.as_secs()
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        error!(
+                                                            "Worker {}: Annual report generation failed for FID {} year {} after {}ms ({}s): {}",
+                                                            worker_id, fid, year, analysis_duration.as_millis(), analysis_duration.as_secs(), e
+                                                        );
+                                                    }
+                                                }
+
+                                                match result {
+                                                    Ok(report) => {
+                                                        // Cache is already updated by generate_annual_report
+                                                        // Just update job status to completed
+                                                        let status_complete_start =
+                                                            std::time::Instant::now();
+                                                        let result_json =
+                                                            serde_json::to_string(&report)
+                                                                .unwrap_or_else(|_| {
+                                                                    "{}".to_string()
+                                                                });
+                                                        if let Err(e) = redis_clone
+                                                            .set_job_status(
+                                                                &job_key,
+                                                                "completed",
+                                                                Some(&result_json),
+                                                            )
+                                                            .await
+                                                        {
+                                                            warn!(
+                                                                "Worker {}: Failed to update job status: {} (took {}ms)",
+                                                                worker_id, e, status_complete_start.elapsed().as_millis()
+                                                            );
+                                                        } else {
+                                                            debug!("Worker {}: Updated job status to completed in {}ms", worker_id, status_complete_start.elapsed().as_millis());
+                                                        }
+
+                                                        // Mark job as inactive
+                                                        let inactive_start =
+                                                            std::time::Instant::now();
+                                                        if let Err(e) = redis_clone
+                                                            .mark_job_inactive(&job_key)
+                                                            .await
+                                                        {
+                                                            warn!(
+                                                                "Worker {}: Failed to mark job inactive: {} (took {}ms)",
+                                                                worker_id, e, inactive_start.elapsed().as_millis()
+                                                            );
+                                                        } else {
+                                                            debug!(
+                                                                "Worker {}: Marked job inactive in {}ms",
+                                                                worker_id,
+                                                                inactive_start.elapsed().as_millis()
+                                                            );
+                                                        }
+
+                                                        let total_duration =
+                                                            job_start_time.elapsed();
+                                                        info!(
+                                                            "Worker {}: ✅ Completed annual report job {} for FID {} year {} - Total time: {}ms ({}s) | Generation: {}ms ({}s) | Status updates: {}ms",
+                                                            worker_id,
+                                                            job_id,
+                                                            fid,
+                                                            year,
+                                                            total_duration.as_millis(),
+                                                            total_duration.as_secs(),
+                                                            analysis_start.elapsed().as_millis(),
+                                                            analysis_start.elapsed().as_secs(),
+                                                            status_update_start.elapsed().as_millis() + status_complete_start.elapsed().as_millis() + inactive_start.elapsed().as_millis()
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        error!(
+                                                            "Worker {}: Job {} failed: {}",
+                                                            worker_id, job_id, e
+                                                        );
+
+                                                        // Update job status to failed
+                                                        if let Err(update_err) = redis_clone
+                                                            .set_job_status(
+                                                                &job_key,
+                                                                "failed",
+                                                                Some(&format!("{e}")),
+                                                            )
+                                                            .await
+                                                        {
+                                                            warn!(
+                                                                "Worker {}: Failed to update job status: {}",
+                                                                worker_id, update_err
+                                                            );
+                                                        }
+
+                                                        // Mark job as inactive
+                                                        if let Err(e) = redis_clone
+                                                            .mark_job_inactive(&job_key)
+                                                            .await
+                                                        {
+                                                            warn!(
+                                                                "Worker {}: Failed to mark job inactive: {}",
+                                                                worker_id, e
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                error!(
+                                                    "Worker {}: Invalid annual_report job data: {}",
+                                                    worker_id, e
                                                 );
 
                                                 // Update job status to failed
@@ -1451,6 +1647,227 @@ async fn handle_job_details(
     println!("      • Check if worker process is actually running (not hung)");
     println!("      • Check database connection is healthy");
     println!("      • Consider optimizing analyze_user() for large datasets");
+
+    Ok(())
+}
+
+/// Handle list tasks command - show all tasks with their execution status
+pub async fn handle_list_tasks(
+    config: &AppConfig,
+    queue: Option<String>,
+    status_filter: Option<String>,
+    limit: usize,
+) -> Result<()> {
+    println!("📋 Task List");
+    println!("============\n");
+
+    // Check Redis configuration
+    let redis_cfg = config.redis.as_ref().ok_or_else(|| {
+        crate::SnapRagError::Custom("Redis configuration is required for listing tasks".to_string())
+    })?;
+
+    let redis = crate::api::redis_client::RedisClient::connect(redis_cfg)?;
+
+    println!("✅ Redis connected\n");
+
+    // Get active jobs
+    let active_jobs = redis.get_active_jobs_status(queue.as_deref()).await?;
+
+    if active_jobs.is_empty() {
+        if let Some(q) = &queue {
+            println!("ℹ️  No tasks found in queue '{q}'");
+        } else {
+            println!("ℹ️  No tasks found");
+        }
+        return Ok(());
+    }
+
+    // Filter by status if specified
+    let filtered_jobs: Vec<_> = if let Some(status) = &status_filter {
+        active_jobs
+            .into_iter()
+            .filter(|(_, job_status, _, _)| job_status == status)
+            .take(limit)
+            .collect()
+    } else {
+        active_jobs.into_iter().take(limit).collect()
+    };
+
+    if filtered_jobs.is_empty() {
+        if let Some(status) = &status_filter {
+            println!("ℹ️  No tasks found with status '{}'", status);
+        } else {
+            println!("ℹ️  No tasks found");
+        }
+        return Ok(());
+    }
+
+    println!("🔍 Found {} task(s):\n", filtered_jobs.len());
+
+    // Group by status
+    let mut processing = Vec::new();
+    let mut completed = Vec::new();
+    let mut failed = Vec::new();
+    let mut pending = Vec::new();
+    let mut unknown = Vec::new();
+
+    for (job_key, status, result, processing_duration) in filtered_jobs {
+        match status.as_str() {
+            "processing" => processing.push((job_key, result, processing_duration)),
+            "completed" => completed.push((job_key, result)),
+            "failed" => failed.push((job_key, result)),
+            "pending" => pending.push((job_key, result)),
+            _ => unknown.push((job_key, status, result)),
+        }
+    }
+
+    // Display tasks grouped by status
+    if !processing.is_empty() {
+        println!("⏳ Processing ({}):", processing.len());
+        for (job_key, _result, duration) in processing {
+            if let Some(dur) = duration {
+                let hours = dur / 3600;
+                let minutes = (dur % 3600) / 60;
+                let seconds = dur % 60;
+                let duration_str = if hours > 0 {
+                    format!("{hours}h {minutes}m {seconds}s")
+                } else if minutes > 0 {
+                    format!("{minutes}m {seconds}s")
+                } else {
+                    format!("{seconds}s")
+                };
+                println!("   • {} - Processing for {}", job_key, duration_str);
+            } else {
+                println!("   • {} - Processing", job_key);
+            }
+        }
+        println!();
+    }
+
+    if !pending.is_empty() {
+        println!("📋 Pending ({}):", pending.len());
+        for (job_key, _result) in pending {
+            println!("   • {}", job_key);
+        }
+        println!();
+    }
+
+    if !completed.is_empty() {
+        println!("✅ Completed ({}):", completed.len());
+        for (job_key, _result) in completed {
+            println!("   • {}", job_key);
+        }
+        println!();
+    }
+
+    if !failed.is_empty() {
+        println!("❌ Failed ({}):", failed.len());
+        for (job_key, result) in failed {
+            println!("   • {}", job_key);
+            if let Some(err) = result {
+                if err.len() < 100 {
+                    println!("     Error: {}", err);
+                } else {
+                    println!("     Error: {}...", &err[..100]);
+                }
+            }
+        }
+        println!();
+    }
+
+    if !unknown.is_empty() {
+        println!("❓ Unknown Status ({}):", unknown.len());
+        for (job_key, status, _result) in unknown {
+            println!("   • {} - Status: {}", job_key, status);
+        }
+        println!();
+        println!("   ⚠️  Note: Jobs with unknown status may be orphaned.");
+        println!("      Their status may have expired (TTL: 24 hours) or never been set.");
+        println!("      Consider using 'snaprag serve worker --cleanup' to clean them up.");
+        println!();
+    }
+
+    println!("💡 Tip: Use 'snaprag task stop <job_key>' to stop a task");
+    println!("   Example: snaprag task stop social:66");
+
+    Ok(())
+}
+
+/// Handle stop task command - stop a task by its job key
+pub async fn handle_stop_task(config: &AppConfig, job_key: String, force: bool) -> Result<()> {
+    use tracing::error;
+    use tracing::info;
+    use tracing::warn;
+
+    println!("🛑 Stop Task");
+    println!("============\n");
+
+    // Check Redis configuration
+    let redis_cfg = config.redis.as_ref().ok_or_else(|| {
+        crate::SnapRagError::Custom(
+            "Redis configuration is required for stopping tasks".to_string(),
+        )
+    })?;
+
+    let redis = crate::api::redis_client::RedisClient::connect(redis_cfg)?;
+
+    println!("✅ Redis connected\n");
+
+    // Check if job exists and get its status
+    let job_status = redis.get_job_status(&job_key).await?;
+
+    if job_status.is_none() {
+        return Err(crate::SnapRagError::Custom(format!(
+            "Task '{}' not found",
+            job_key
+        )));
+    }
+
+    let (status, _result) = job_status.unwrap();
+
+    // Check if job is already completed or failed
+    if status == "completed" {
+        println!("ℹ️  Task '{}' is already completed", job_key);
+        return Ok(());
+    }
+
+    if status == "failed" {
+        println!("ℹ️  Task '{}' has already failed", job_key);
+        return Ok(());
+    }
+
+    // Check if job is processing and force is not set
+    if status == "processing" && !force {
+        return Err(crate::SnapRagError::Custom(format!(
+            "Task '{}' is currently processing. Use --force to stop it anyway (may cause data inconsistency)",
+            job_key
+        )));
+    }
+
+    // Extract job type from job_key (format: "type:fid" or "type:fid:year")
+    let job_type = job_key.split(':').next().unwrap_or("unknown");
+
+    // Mark job as inactive
+    if let Err(e) = redis.mark_job_inactive(&job_key).await {
+        warn!("Failed to mark job as inactive: {}", e);
+    } else {
+        info!("Marked job {} as inactive", job_key);
+    }
+
+    // Set job status to "cancelled"
+    if let Err(e) = redis.set_job_status(&job_key, "cancelled", None).await {
+        error!("Failed to set job status: {}", e);
+        return Err(crate::SnapRagError::Custom(format!(
+            "Failed to stop task: {}",
+            e
+        )));
+    }
+
+    println!("✅ Task '{}' has been stopped", job_key);
+    println!();
+    println!("💡 The task status has been set to 'cancelled'");
+    println!("   Note: If the task was in a queue, it may still be processed by a worker");
+    println!("   until the worker checks the job status.");
 
     Ok(())
 }

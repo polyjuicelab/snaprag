@@ -296,6 +296,7 @@ pub async fn get_social_analysis(
                 job_type: "social",
                 job_key: job_key.clone(),
                 fid,
+                year: None,
             };
             trigger_background_update(&state, &job_config).await;
 
@@ -318,6 +319,7 @@ pub async fn get_social_analysis(
                 job_type: "social",
                 job_key: job_key.clone(),
                 fid,
+                year: None,
             };
             trigger_background_update(&state, &job_config).await;
 
@@ -343,6 +345,7 @@ pub async fn get_social_analysis(
         job_type: "social",
         job_key: job_key.clone(),
         fid,
+        year: None,
     };
     match check_or_create_job(&state, &job_config).await {
         JobResult::AlreadyExists(status) => {
@@ -510,6 +513,7 @@ pub async fn get_social_analysis_by_username(
                 job_type: "social",
                 job_key: job_key.clone(),
                 fid,
+                year: None,
             };
             trigger_background_update(&state, &job_config).await;
 
@@ -528,6 +532,7 @@ pub async fn get_social_analysis_by_username(
                 job_type: "social",
                 job_key: job_key.clone(),
                 fid,
+                year: None,
             };
             trigger_background_update(&state, &job_config).await;
 
@@ -542,6 +547,7 @@ pub async fn get_social_analysis_by_username(
                 job_type: "social",
                 job_key: job_key.clone(),
                 fid,
+                year: None,
             };
             match check_or_create_job(&state, &job_config).await {
                 JobResult::AlreadyExists(status) => {
