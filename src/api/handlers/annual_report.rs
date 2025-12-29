@@ -16,6 +16,12 @@ use tracing::info;
 use tracing::warn;
 
 use super::AppState;
+use crate::api::handlers::job_helpers::check_or_create_job;
+use crate::api::handlers::job_helpers::create_job_status_response;
+use crate::api::handlers::job_helpers::create_updating_response;
+use crate::api::handlers::job_helpers::trigger_background_update;
+use crate::api::handlers::job_helpers::JobConfig;
+use crate::api::handlers::job_helpers::JobResult;
 use crate::api::types::ApiResponse;
 use crate::text_analysis::analyze_text;
 use crate::text_analysis::count_word_frequencies;
@@ -41,6 +47,8 @@ pub async fn get_annual_report(
     let start_time = std::time::Instant::now();
     info!("GET /api/users/{}/annual-report/{}", fid, year);
 
+    let job_key = format!("annual_report:{fid}:{year}");
+
     // Check cache first
     match state.cache_service.get_annual_report(fid, year).await {
         Ok(crate::api::cache::CacheResult::Fresh(cached_report)) => {
@@ -54,34 +62,106 @@ pub async fn get_annual_report(
             return Ok(Json(ApiResponse::success(cached_report)));
         }
         Ok(crate::api::cache::CacheResult::Stale(cached_report)) => {
-            // Stale cache - return stale data (annual reports don't change often)
+            // Stale cache - return stale data and trigger background update
             info!(
-                "📦 Annual report cache hit (stale) for FID {} year {}",
+                "📦 Annual report cache hit (stale) for FID {} year {}, triggering background update",
                 fid, year
             );
+
+            // Trigger background update if Redis is available
+            let job_config = JobConfig {
+                job_type: "annual_report",
+                job_key: job_key.clone(),
+                fid,
+                year: Some(year),
+            };
+            trigger_background_update(&state, &job_config).await;
+
             let duration = start_time.elapsed();
             return Ok(Json(ApiResponse::success(cached_report)));
         }
         Ok(crate::api::cache::CacheResult::Updating(cached_report)) => {
-            // Cache expired - return old data (annual reports are historical data, so old data is still valid)
+            // Cache expired - return updating status with old data
             info!(
-                "🔄 Annual report cache expired (updating) for FID {} year {}, returning cached data",
+                "🔄 Annual report cache expired (updating) for FID {} year {}, returning old data with updating status",
                 fid, year
             );
+
+            // Trigger background update if Redis is available
+            let job_config = JobConfig {
+                job_type: "annual_report",
+                job_key: job_key.clone(),
+                fid,
+                year: Some(year),
+            };
+            trigger_background_update(&state, &job_config).await;
+
             let duration = start_time.elapsed();
-            return Ok(Json(ApiResponse::success(cached_report)));
+            return Ok(create_updating_response(
+                &cached_report,
+                "Annual report is being updated in the background. Please refresh to get the latest data.",
+            ));
         }
         Ok(crate::api::cache::CacheResult::Miss) => {
             info!("📭 Annual report cache miss for FID {} year {}", fid, year);
         }
         Err(e) => {
-            warn!(
-                "Cache lookup error for annual report FID {} year {}: {}",
-                fid, year, e
-            );
-            // Continue with database query on cache error
+            error!("Cache error for FID {} year {}: {}", fid, year, e);
+            // Continue to process
         }
     }
+
+    // Cache miss - check if job is already processing
+    let job_config = JobConfig {
+        job_type: "annual_report",
+        job_key: job_key.clone(),
+        fid,
+        year: Some(year),
+    };
+    match check_or_create_job(&state, &job_config).await {
+        JobResult::AlreadyExists(status) => {
+            let message = match status.as_str() {
+                "pending" => "Report generation is queued, please check back later",
+                "processing" => "Report generation in progress, please check back later",
+                "completed" => {
+                    // Job completed but cache not updated yet - try to get result from status
+                    if let Some(redis_cfg) = &state.config.redis {
+                        if let Ok(redis_client) =
+                            crate::api::redis_client::RedisClient::connect(redis_cfg)
+                        {
+                            if let Ok(Some((_, Some(result_json)))) =
+                                redis_client.get_job_status(&job_key).await
+                            {
+                                // Try to parse the result and return it
+                                if let Ok(report_data) =
+                                    serde_json::from_str::<serde_json::Value>(&result_json)
+                                {
+                                    return Ok(Json(ApiResponse::success(report_data)));
+                                }
+                            }
+                        }
+                    }
+                    "Report generation completed, refreshing cache..."
+                }
+                "failed" => "Report generation failed, please try again",
+                _ => "Report generation in progress, please check back later",
+            };
+            return Ok(create_job_status_response(&job_key, &status, message));
+        }
+        JobResult::Created => {
+            return Ok(create_job_status_response(
+                &job_key,
+                "pending",
+                "Report generation started, please check back later",
+            ));
+        }
+        JobResult::Failed => {
+            // Fall through to synchronous processing
+        }
+    }
+
+    // Fallback: process synchronously if Redis is not available
+    error!("Redis not available, falling back to synchronous processing");
 
     // Calculate time range for the year
     let year_start = DateTime::parse_from_rfc3339(&format!("{year}-01-01T00:00:00Z"))
