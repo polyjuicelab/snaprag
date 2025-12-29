@@ -11,6 +11,7 @@ use snaprag::cli::FetchCommands;
 use snaprag::cli::RagCommands;
 use snaprag::cli::ServeCommands;
 use snaprag::cli::SyncCommands;
+use snaprag::cli::TaskCommands;
 use snaprag::cli::UserCommands;
 use snaprag::AppConfig;
 use snaprag::Result;
@@ -537,6 +538,18 @@ async fn main() -> Result<()> {
             }
             ServeCommands::Status { queue, job } => {
                 snaprag::cli::handle_worker_status(&config, queue, job).await?;
+            }
+        },
+        Commands::Task(task_cmd) => match task_cmd {
+            snaprag::cli::commands::TaskCommands::List {
+                queue,
+                status,
+                limit,
+            } => {
+                snaprag::cli::handle_list_tasks(&config, queue, status, limit).await?;
+            }
+            snaprag::cli::commands::TaskCommands::Stop { job_key, force } => {
+                snaprag::cli::handle_stop_task(&config, job_key, force).await?;
             }
         },
     }
