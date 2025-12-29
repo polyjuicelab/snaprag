@@ -239,6 +239,7 @@ pub async fn get_cast_stats(
                 job_type: "cast_stats",
                 job_key: job_key.clone(),
                 fid,
+                year: None,
             };
             match check_or_create_job(&state, &job_config).await {
                 JobResult::AlreadyExists(status) => {

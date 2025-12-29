@@ -120,6 +120,7 @@ pub async fn get_mbti_analysis(
         job_type: "mbti",
         job_key: job_key.clone(),
         fid,
+        year: None,
     };
     match check_or_create_job(&state, &job_config).await {
         JobResult::AlreadyExists(status) => {
@@ -395,6 +396,7 @@ pub async fn get_mbti_analysis_by_username(
                 job_type: "mbti",
                 job_key: job_key.clone(),
                 fid,
+                year: None,
             };
             match check_or_create_job(&state, &job_config).await {
                 JobResult::AlreadyExists(status) => {
