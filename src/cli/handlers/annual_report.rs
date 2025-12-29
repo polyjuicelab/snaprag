@@ -203,7 +203,7 @@ fn create_cache_service(config: &AppConfig) -> Result<CacheService> {
 /// If force is false and cache is fresh, returns cached data.
 /// If cache is stale/updating, generates new report and updates cache (CLI purpose: build cache).
 #[allow(clippy::too_many_lines)] // Complex report generation requires many lines
-async fn generate_annual_report(
+pub async fn generate_annual_report(
     database: &Database,
     cache_service: Option<&CacheService>,
     fid: i64,
