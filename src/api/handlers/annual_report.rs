@@ -111,6 +111,20 @@ pub async fn get_annual_report(
         }
     }
 
+    // Validate user exists before creating job
+    match state.database.get_user_profile(fid).await {
+        Ok(Some(_)) => {
+            // User exists, continue
+        }
+        Ok(None) => {
+            return Err(StatusCode::NOT_FOUND);
+        }
+        Err(e) => {
+            error!("Error fetching profile for FID {}: {}", fid, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
     // Cache miss - check if job is already processing
     let job_config = JobConfig {
         job_type: "annual_report",
