@@ -51,6 +51,150 @@ async fn parse_user_identifier(
     }
 }
 
+/// Analyze recent activity from casts to understand what user is working on
+fn analyze_recent_activity(casts: &[crate::models::CastSearchResult]) -> String {
+    if casts.is_empty() {
+        return String::new();
+    }
+
+    // Get most recent casts (last 10-20 for activity analysis)
+    let recent_casts: Vec<&crate::models::CastSearchResult> = casts.iter().take(20).collect();
+
+    // Combine text from recent casts (preserve case for better analysis)
+    let all_text_lower: String = recent_casts
+        .iter()
+        .map(|c| c.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+
+    let mut activity_parts = Vec::new();
+
+    // Detect building/development activities
+    let build_phrases = [
+        "building",
+        "working on",
+        "developing",
+        "coding",
+        "shipping",
+        "launching",
+        "released",
+        "deployed",
+        "just built",
+        "working on a",
+    ];
+    let build_count = build_phrases
+        .iter()
+        .map(|phrase| all_text_lower.matches(phrase).count())
+        .sum::<usize>();
+
+    if build_count > 0 {
+        activity_parts.push("actively building/developing".to_string());
+    }
+
+    // Detect learning activities
+    let learn_phrases = [
+        "learning",
+        "studying",
+        "reading about",
+        "exploring",
+        "trying out",
+        "experimenting",
+        "figuring out",
+    ];
+    let learn_count = learn_phrases
+        .iter()
+        .map(|phrase| all_text_lower.matches(phrase).count())
+        .sum::<usize>();
+
+    if learn_count > 0 {
+        activity_parts.push("learning/exploring new things".to_string());
+    }
+
+    // Detect project/product work
+    let project_phrases = [
+        "project", "app", "protocol", "dapp", "product", "feature", "tool",
+    ];
+    let project_count = project_phrases
+        .iter()
+        .map(|phrase| all_text_lower.matches(phrase).count())
+        .sum::<usize>();
+
+    if project_count > 2 {
+        activity_parts.push("working on projects/products".to_string());
+    }
+
+    // Detect community engagement
+    let community_phrases = [
+        "community",
+        "team",
+        "collaboration",
+        "working with",
+        "partnership",
+        "together with",
+    ];
+    let community_count = community_phrases
+        .iter()
+        .map(|phrase| all_text_lower.matches(phrase).count())
+        .sum::<usize>();
+
+    if community_count > 0 {
+        activity_parts.push("engaged with community/teams".to_string());
+    }
+
+    // Extract specific technologies/topics mentioned frequently
+    let tech_keywords = [
+        ("web3", "Web3"),
+        ("crypto", "crypto"),
+        ("blockchain", "blockchain"),
+        ("base", "Base"),
+        ("ethereum", "Ethereum"),
+        ("solidity", "Solidity"),
+        ("rust", "Rust"),
+        ("typescript", "TypeScript"),
+        ("react", "React"),
+        ("ai", "AI"),
+        ("ml", "machine learning"),
+        ("defi", "DeFi"),
+        ("nft", "NFTs"),
+    ];
+
+    let mut mentioned_techs = Vec::new();
+    for (keyword, display) in &tech_keywords {
+        let count = all_text_lower.matches(keyword).count();
+        if count > 0 {
+            mentioned_techs.push(*display);
+        }
+    }
+
+    // Build summary
+    let mut summary = String::new();
+
+    if !activity_parts.is_empty() {
+        summary.push_str("Current activities: ");
+        summary.push_str(&activity_parts.join(", "));
+        summary.push('.');
+    }
+
+    if !mentioned_techs.is_empty() && mentioned_techs.len() <= 6 {
+        if !summary.is_empty() {
+            summary.push(' ');
+        }
+        summary.push_str("Technologies/topics you're engaged with: ");
+        summary.push_str(&mentioned_techs.join(", "));
+        summary.push('.');
+    }
+
+    // If no specific activities found, provide general context
+    if summary.is_empty() && recent_casts.len() >= 5 {
+        summary.push_str(
+            "You're active on Farcaster, sharing thoughts and engaging with the community.",
+        );
+    }
+
+    summary
+}
+
 /// Build chat context for LLM
 pub fn build_chat_context(
     profile: &crate::models::UserProfile,
@@ -62,7 +206,7 @@ pub fn build_chat_context(
 
     write!(
         context,
-        "You are role-playing as {}, a Farcaster user",
+        "You ARE {}, a Farcaster user",
         profile.display_name.as_deref().unwrap_or("Unknown")
     )
     .unwrap();
@@ -73,9 +217,66 @@ pub fn build_chat_context(
 
     write!(context, ". Your FID is {}.\n\n", profile.fid).unwrap();
 
+    context.push_str("🚫 CRITICAL: You MUST respond AS THIS USER, not as an AI or assistant.\n");
+    context.push_str("❌ NEVER use format markers like \"User:\", \"Me:\", \"assistant:\", or any role labels.\n");
+    context.push_str("✅ Respond DIRECTLY as if you are posting on Farcaster - just your message, nothing else.\n\n");
+
+    // Build comprehensive identity section
+    context.push_str("═══════════════════════════════════════════════════════\n");
+    context.push_str("👤 YOUR IDENTITY - WHO YOU ARE\n");
+    context.push_str("═══════════════════════════════════════════════════════\n\n");
+
+    // Bio contains important identity information
     if let Some(bio) = &profile.bio {
-        write!(context, "Your bio: {bio}\n\n").unwrap();
+        if !bio.trim().is_empty() {
+            write!(context, "About you: {bio}\n\n").unwrap();
+        }
     }
+
+    // Add location if available (helps with context)
+    if let Some(location) = &profile.location {
+        if !location.trim().is_empty() {
+            write!(context, "Location: {location}\n\n").unwrap();
+        }
+    }
+
+    // Add professional/online presence (indicates role/interests)
+    let mut professional_info = Vec::new();
+    if let Some(website) = &profile.website_url {
+        if !website.trim().is_empty() {
+            professional_info.push(format!("Website: {website}"));
+        }
+    }
+    if let Some(github) = &profile.github_username {
+        if !github.trim().is_empty() {
+            professional_info.push(format!("GitHub: @{github}"));
+        }
+    }
+    if let Some(twitter) = &profile.twitter_username {
+        if !twitter.trim().is_empty() {
+            professional_info.push(format!("Twitter: @{twitter}"));
+        }
+    }
+
+    if !professional_info.is_empty() {
+        context.push_str(&professional_info.join(" | "));
+        context.push_str("\n\n");
+    }
+
+    // Analyze what user is working on/doing from casts
+    if !casts.is_empty() {
+        let recent_activity = analyze_recent_activity(casts);
+        if !recent_activity.is_empty() {
+            context.push_str("🎯 WHAT YOU'RE CURRENTLY WORKING ON / FOCUSED ON:\n\n");
+            context.push_str(&recent_activity);
+            context.push_str("\n\n");
+        }
+    }
+
+    context.push_str("💡 IMPORTANT: When responding, embody this identity naturally. ");
+    context.push_str("Reference your work, interests, and current activities when relevant, ");
+    context.push_str("but keep it authentic to how you actually communicate.\n\n");
+    context.push_str("═══════════════════════════════════════════════════════\n\n");
 
     // Add writing style analysis and examples
     if !casts.is_empty() {
@@ -115,9 +316,14 @@ pub fn build_chat_context(
         context.push_str("3. COPY tone (casual/professional/technical)\n");
         context.push_str("4. EMOJIS: If examples have them, USE THEM. If not, DON'T.\n");
         context.push_str("5. MATCH punctuation (!,?, etc.)\n");
-        context.push_str("6. KEEP slang if present (lol, fr, ngl, etc.)\n\n");
+        context.push_str("6. KEEP slang if present (lol, fr, ngl, etc.)\n");
+        context.push_str("7. NEVER include \"User:\", \"Me:\", \"assistant:\" or any role labels in your response\n");
+        context.push_str("8. Respond as if you are directly posting - no formatting, no labels, just your words\n\n");
 
-        context.push_str("⚡ Ask: \"Does this sound EXACTLY like my examples?\"\n\n");
+        context.push_str("⚡ Ask: \"Does this sound EXACTLY like my examples?\"\n");
+        context.push_str(
+            "⚡ Ask: \"Am I using any role labels or format markers?\" If yes, REMOVE THEM.\n\n",
+        );
         context.push_str("═══════════════════════════════════════════════════════\n\n");
     }
 
@@ -125,16 +331,87 @@ pub fn build_chat_context(
     if !session.conversation_history.is_empty() {
         context.push_str("Previous conversation:\n\n");
         for message in &session.conversation_history {
-            writeln!(context, "{}: {}", message.role, message.content).unwrap();
+            // Format history without role labels to avoid AI mimicking them
+            if message.role == "user" {
+                writeln!(context, "They asked: {}", message.content).unwrap();
+            } else {
+                writeln!(context, "You replied: {}", message.content).unwrap();
+            }
         }
         context.push('\n');
     }
 
     context.push_str("═══ THE QUESTION ═══\n\n");
-    write!(context, "User: {message}\n\n").unwrap();
-    context.push_str("You (RESPOND IN YOUR EXACT STYLE):");
+    write!(context, "They asked: {message}\n\n").unwrap();
+    context.push_str(
+        "🚫 REMEMBER: Respond DIRECTLY as yourself. NO \"User:\", NO \"Me:\", NO labels.\n",
+    );
+    context.push_str("✅ Just write your response exactly as you would post it on Farcaster:\n\n");
 
     context
+}
+
+/// Clean response text to remove any format markers or role labels
+/// This ensures AI responses don't include unwanted format markers like "User:", "Me:", etc.
+pub fn clean_response_text(text: &str) -> String {
+    let mut cleaned = text.trim().to_string();
+
+    // Split by lines and clean each line
+    let lines: Vec<&str> = cleaned.lines().collect();
+    let mut cleaned_lines = Vec::new();
+
+    for line in lines {
+        let line_lower = line.trim().to_lowercase();
+        let mut line_cleaned = line.trim();
+
+        // Remove common format markers at the start of lines (case-insensitive)
+        let format_prefixes = [
+            "user:",
+            "me:",
+            "assistant:",
+            "you:",
+            "they:",
+            "me (",
+            "user (",
+            "assistant (",
+        ];
+
+        // Check if line starts with any format prefix
+        let mut should_skip = false;
+        for prefix in &format_prefixes {
+            if line_lower.starts_with(prefix) {
+                // Find the colon to remove the prefix
+                // Handle formats like "User:", "Me:", "Me (@user, FID 99):", etc.
+                if let Some(colon_pos) = line.find(':') {
+                    line_cleaned = line[colon_pos + 1..].trim();
+                    // If after removing prefix, line is empty or just whitespace, skip it
+                    if line_cleaned.is_empty() {
+                        should_skip = true;
+                    }
+                } else {
+                    // No colon found, skip this line entirely
+                    should_skip = true;
+                }
+                break;
+            }
+        }
+
+        // Skip lines that are just format markers
+        if should_skip || line_cleaned.is_empty() {
+            continue;
+        }
+
+        cleaned_lines.push(line_cleaned.to_string());
+    }
+
+    cleaned = cleaned_lines.join("\n").trim().to_string();
+
+    // If the entire response was just format markers, return original (trimmed)
+    if cleaned.is_empty() {
+        return text.trim().to_string();
+    }
+
+    cleaned
 }
 
 /// Create chat session
@@ -401,7 +678,7 @@ pub async fn send_chat_message(
         )));
     };
 
-    let response_text = match llm_service
+    let mut response_text = match llm_service
         .generate_with_params(&context, session.temperature, 2000)
         .await
     {
@@ -411,6 +688,9 @@ pub async fn send_chat_message(
             return Ok(Json(ApiResponse::error("Failed to generate response")));
         }
     };
+
+    // Clean response to remove any format markers
+    response_text = clean_response_text(&response_text);
 
     // Add to conversation history
     session.add_message("user", req.message.clone());
