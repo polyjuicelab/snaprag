@@ -357,7 +357,7 @@ pub async fn process_chat_job(
     };
 
     // Generate response
-    let response_text = match llm_service
+    let mut response_text = match llm_service
         .generate_with_params(&context, session.temperature, 2000)
         .await
     {
@@ -381,6 +381,9 @@ pub async fn process_chat_job(
             return Err(format!("LLM generation error: {}", e).into());
         }
     };
+
+    // Clean response to remove any format markers
+    response_text = crate::api::handlers::chat::clean_response_text(&response_text);
 
     // Update session
     session.add_message("user", message.to_string());
