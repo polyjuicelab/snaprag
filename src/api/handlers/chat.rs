@@ -2,11 +2,13 @@
 use std::fmt::Write;
 
 use axum::extract::Path;
+use axum::extract::Query;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use tracing::error;
 use tracing::info;
+use uuid::Uuid;
 
 use super::AppState;
 use crate::api::types::ApiResponse;
@@ -14,6 +16,7 @@ use crate::api::types::ChatMessageRequest;
 use crate::api::types::ChatMessageResponse;
 use crate::api::types::CreateChatRequest;
 use crate::api::types::CreateChatResponse;
+use crate::api::types::GetSessionRequest;
 use crate::api::types::SessionInfoResponse;
 
 /// Parse user identifier (FID or username) and return FID
@@ -49,7 +52,7 @@ async fn parse_user_identifier(
 }
 
 /// Build chat context for LLM
-fn build_chat_context(
+pub fn build_chat_context(
     profile: &crate::models::UserProfile,
     casts: &[crate::models::CastSearchResult],
     session: &crate::api::session::ChatSession,
@@ -185,13 +188,23 @@ pub async fn create_chat_session(
 
     // Create session
     #[allow(clippy::cast_possible_wrap)] // FID from session is guaranteed to fit in i64
-    let session = state.session_manager.create_session(
-        fid as i64,
-        profile.username.clone(),
-        profile.display_name.clone(),
-        req.context_limit,
-        req.temperature,
-    );
+    let session = match state
+        .session_manager
+        .create_session(
+            fid as i64,
+            profile.username.clone(),
+            profile.display_name.clone(),
+            req.context_limit,
+            req.temperature,
+        )
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            error!("Failed to create session: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
 
     info!(
         "Created chat session: {} for FID {}",
@@ -226,10 +239,49 @@ pub async fn send_chat_message(
 ) -> Result<Json<ApiResponse<ChatMessageResponse>>, StatusCode> {
     info!("POST /api/chat/message - session: {}", req.session_id);
 
-    // Get session
-    let Some(mut session) = state.session_manager.get_session(&req.session_id) else {
-        return Ok(Json(ApiResponse::error("Session not found or expired")));
+    // Verify session exists first
+    let session = match state.session_manager.get_session(&req.session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return Ok(Json(ApiResponse::error("Session not found or expired")));
+        }
+        Err(e) => {
+            error!("Failed to get session: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
     };
+
+    // Check if Redis is available for queue mode
+    if let Some(redis_cfg) = &state.config.redis {
+        if let Ok(redis_client) = crate::api::redis_client::RedisClient::connect(redis_cfg) {
+            // Create job for async processing
+            let message_id = Uuid::new_v4().to_string();
+            let job_key = format!("chat:{}:{}", req.session_id, message_id);
+            let job_data = serde_json::json!({
+                "session_id": req.session_id,
+                "message": req.message,
+                "type": "chat"
+            })
+            .to_string();
+
+            if let Ok(Some(_job_id)) = redis_client.push_job("chat", &job_key, &job_data).await {
+                info!(
+                    "📤 Created chat job: {} for session: {}",
+                    job_key, req.session_id
+                );
+                return Ok(Json(ApiResponse::success(ChatMessageResponse {
+                    session_id: req.session_id,
+                    message: "Processing... Please check back later or poll for result".to_string(),
+                    relevant_casts_count: 0,
+                    conversation_length: session.conversation_history.len(),
+                })));
+            }
+        }
+    }
+
+    // Fallback to synchronous processing if Redis is not available or job creation failed
+    info!("Processing chat message synchronously (queue mode unavailable)");
+    let mut session = session;
 
     // Get user profile
     let profile = match state.database.get_user_profile(session.fid).await {
@@ -365,7 +417,10 @@ pub async fn send_chat_message(
     session.add_message("assistant", response_text.clone());
 
     // Update session
-    state.session_manager.update_session(session.clone());
+    if let Err(e) = state.session_manager.update_session(session.clone()).await {
+        error!("Failed to update session: {}", e);
+        // Continue anyway, response already generated
+    }
 
     Ok(Json(ApiResponse::success(ChatMessageResponse {
         session_id: session.session_id,
@@ -382,12 +437,12 @@ pub async fn send_chat_message(
 /// Returns `StatusCode::NOT_FOUND` if session is not found.
 pub async fn get_chat_session(
     State(state): State<AppState>,
-    Path(session_id): Path<String>,
+    Query(params): Query<GetSessionRequest>,
 ) -> Result<Json<ApiResponse<SessionInfoResponse>>, StatusCode> {
-    info!("GET /api/chat/session/{}", session_id);
+    info!("GET /api/chat/session?session_id={}", params.session_id);
 
-    match state.session_manager.get_session(&session_id) {
-        Some(session) => Ok(Json(ApiResponse::success(SessionInfoResponse {
+    match state.session_manager.get_session(&params.session_id).await {
+        Ok(Some(session)) => Ok(Json(ApiResponse::success(SessionInfoResponse {
             session_id: session.session_id,
             fid: session.fid,
             username: session.username.clone(),
@@ -396,7 +451,11 @@ pub async fn get_chat_session(
             created_at: session.created_at,
             last_activity: session.last_activity,
         }))),
-        None => Ok(Json(ApiResponse::error("Session not found or expired"))),
+        Ok(None) => Ok(Json(ApiResponse::error("Session not found or expired"))),
+        Err(e) => {
+            error!("Failed to get session: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -411,6 +470,11 @@ pub async fn delete_chat_session(
 ) -> Result<Json<ApiResponse<String>>, StatusCode> {
     info!("DELETE /api/chat/session/{}", session_id);
 
-    state.session_manager.delete_session(&session_id);
-    Ok(Json(ApiResponse::success("Session deleted".to_string())))
+    match state.session_manager.delete_session(&session_id).await {
+        Ok(_) => Ok(Json(ApiResponse::success("Session deleted".to_string()))),
+        Err(e) => {
+            error!("Failed to delete session: {}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
 }

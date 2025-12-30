@@ -97,9 +97,21 @@ pub async fn serve_api(
         snapchain_client,
     )));
 
-    // Create session manager (1 hour timeout)
-    let session_manager = Arc::new(crate::api::session::SessionManager::new(3600));
-    info!("Session manager initialized (timeout: 1 hour)");
+    // Initialize Redis client (required for session management and cache)
+    let redis_cfg = config.redis.as_ref().ok_or_else(|| {
+        crate::SnapRagError::Custom(
+            "Redis configuration is required for session management and cache service".to_string(),
+        )
+    })?;
+    let redis_client = Arc::new(crate::api::redis_client::RedisClient::connect(redis_cfg)?);
+    info!("✅ Redis client initialized");
+
+    // Create session manager (1 hour timeout) - requires Redis
+    let session_manager = Arc::new(crate::api::session::SessionManager::new(
+        3600,
+        redis_client.clone(),
+    ));
+    info!("✅ Session manager initialized (timeout: 1 hour)");
 
     // Initialize cache service with Redis
     info!("🔧 Initializing cache service...");
@@ -109,25 +121,18 @@ pub async fn serve_api(
     info!("  Annual report TTL: never expire (permanent)");
     info!("  Enable stats: {}", config.cache.enable_stats);
 
-    let cache_service = if let Some(redis_cfg) = &config.redis {
-        let redis = Arc::new(crate::api::redis_client::RedisClient::connect(redis_cfg)?);
-        Arc::new(CacheService::with_config(
-            redis,
-            crate::api::cache::CacheConfig {
-                profile_ttl: std::time::Duration::from_secs(config.cache.profile_ttl_secs),
-                social_ttl: std::time::Duration::from_secs(config.cache.social_ttl_secs),
-                mbti_ttl: std::time::Duration::from_secs(7200), // 2 hours for MBTI
-                cast_stats_ttl: std::time::Duration::from_secs(config.cache.cast_stats_ttl_secs),
-                annual_report_ttl: std::time::Duration::from_secs(0), // Never expire (permanent)
-                stale_threshold: Duration::from_secs(redis_cfg.stale_threshold_secs),
-                enable_stats: config.cache.enable_stats,
-            },
-        ))
-    } else {
-        return Err(crate::SnapRagError::Custom(
-            "Redis configuration is required for cache service".to_string(),
-        ));
-    };
+    let cache_service = Arc::new(CacheService::with_config(
+        redis_client,
+        crate::api::cache::CacheConfig {
+            profile_ttl: std::time::Duration::from_secs(config.cache.profile_ttl_secs),
+            social_ttl: std::time::Duration::from_secs(config.cache.social_ttl_secs),
+            mbti_ttl: std::time::Duration::from_secs(7200), // 2 hours for MBTI
+            cast_stats_ttl: std::time::Duration::from_secs(config.cache.cast_stats_ttl_secs),
+            annual_report_ttl: std::time::Duration::from_secs(0), // Never expire (permanent)
+            stale_threshold: Duration::from_secs(redis_cfg.stale_threshold_secs),
+            enable_stats: config.cache.enable_stats,
+        },
+    ));
 
     if config.cache.enabled {
         info!("✅ Cache service initialized (enabled) with Redis");
