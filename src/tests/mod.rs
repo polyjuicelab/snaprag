@@ -1,4 +1,5 @@
 pub mod batch_insert_test;
+pub mod chat_queue_test;
 pub mod cross_batch_duplicates_test;
 pub mod database_tests;
 pub mod deterministic_blocks_test;
