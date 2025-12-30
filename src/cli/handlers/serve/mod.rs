@@ -7,6 +7,8 @@ use crate::AppConfig;
 use crate::Result;
 use crate::SnapRag;
 
+mod chat;
+
 pub async fn handle_serve_api(
     config: &AppConfig,
     host: String,
@@ -299,6 +301,7 @@ pub async fn handle_serve_worker(
         let redis_clone = redis.clone();
         let database_clone = database.clone();
         let queues_clone = queues.clone();
+        let config_clone = config.clone();
 
         let handle = tokio::spawn(async move {
             info!(
@@ -350,11 +353,50 @@ pub async fn handle_serve_worker(
                             }
                         };
 
-                        // Extract job type and FID
+                        // Extract job type
                         let job_type = job
                             .get("type")
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown");
+
+                        // Handle chat jobs separately (they don't have fid, use session_id instead)
+                        if job_type == "chat" {
+                            // Get session_id from job data to build job_key
+                            let session_id = match job.get("session_id").and_then(|v| v.as_str()) {
+                                Some(id) => id,
+                                None => {
+                                    error!("Worker {}: Missing session_id in chat job", worker_id);
+                                    continue;
+                                }
+                            };
+
+                            // Extract message_id from job_id to reconstruct job_key
+                            // Job key format: chat:{session_id}:{message_id}
+                            // Job ID format: job:chat:{uuid}
+                            // Extract message_id from job_id (fallback to "unknown" if not found)
+                            let message_id = job_id.strip_prefix("job:chat:").unwrap_or("unknown");
+
+                            let job_key = format!("chat:{}:{}", session_id, message_id);
+
+                            // Process chat job using the chat module
+                            if let Err(e) = chat::process_chat_job(
+                                worker_id,
+                                &job_id,
+                                &job,
+                                &job_key,
+                                job_start_time,
+                                redis_clone.clone(),
+                                database_clone.clone(),
+                                &config_clone,
+                            )
+                            .await
+                            {
+                                error!("Worker {}: Chat job processing failed: {}", worker_id, e);
+                            }
+                            continue; // Skip the match fid block below
+                        }
+
+                        // For non-chat jobs, extract FID
                         let fid = job
                             .get("fid")
                             .and_then(serde_json::Value::as_i64)
@@ -1100,6 +1142,8 @@ pub async fn handle_serve_worker(
                                             }
                                         }
                                     }
+                                    // Note: "chat" jobs are handled separately above (before match fid)
+                                    // because they don't have a fid field
                                     _ => {
                                         error!(
                                             "Worker {}: Unknown job type: {}",
