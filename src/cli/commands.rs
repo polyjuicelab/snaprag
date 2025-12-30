@@ -682,8 +682,9 @@ pub enum ServeCommands {
     },
     /// Start background worker for processing jobs
     Worker {
-        /// Queue name(s) to process (comma-separated, e.g., "social,mbti" or default: "social,mbti")
-        #[arg(long, default_value = "social,mbti")]
+        /// Queue name(s) to process (comma-separated, e.g., "social,mbti,chat" or default: "social,mbti,chat,cast_stats,annual_report")
+        /// Supported queues: social, mbti, chat, cast_stats, annual_report
+        #[arg(long, default_value = "social,mbti,chat,cast_stats,annual_report")]
         queue: String,
         /// Number of concurrent workers
         #[arg(long, default_value = "1")]

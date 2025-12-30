@@ -1002,6 +1002,17 @@ Query the RAG system with a question.
 
 ### Chat Sessions
 
+**Session Storage**: Chat sessions are stored in Redis with automatic expiration (default: 1 hour TTL). This enables:
+- Multi-process session sharing (API server and workers can access the same sessions)
+- Horizontal scaling (multiple API instances can share session state)
+- Automatic cleanup (expired sessions are automatically removed by Redis TTL)
+
+**Queue Processing**: Chat message processing can be handled asynchronously via a worker queue:
+- Jobs are created in the `chat` queue when Redis is available
+- Workers process jobs in the background, updating sessions and storing results
+- Clients can poll for job completion status
+- Falls back to synchronous processing if Redis is unavailable
+
 #### POST `/api/chat/create`
 
 Create a new chat session with a user.
@@ -1032,7 +1043,11 @@ Create a new chat session with a user.
 
 #### POST `/api/chat/message`
 
-Send a message in a chat session.
+Send a message in a chat session. This endpoint supports both synchronous and asynchronous (queue-based) processing modes.
+
+**Processing Modes:**
+- **Queue Mode (Async)**: If Redis is available, the request is queued for background processing by a worker. The API immediately returns a pending status, and the client should poll for results.
+- **Synchronous Mode**: If Redis is unavailable, the request is processed synchronously and the response is returned immediately.
 
 **Request Body:**
 ```json
@@ -1042,7 +1057,20 @@ Send a message in a chat session.
 }
 ```
 
-**Response:**
+**Response (Queue Mode - Pending):**
+```json
+{
+  "success": true,
+  "data": {
+    "session_id": "uuid-here",
+    "message": "Processing... Please check back later or poll for result",
+    "relevant_casts_count": 0,
+    "conversation_length": 2
+  }
+}
+```
+
+**Response (Synchronous Mode or Completed):**
 ```json
 {
   "success": true,
@@ -1054,6 +1082,8 @@ Send a message in a chat session.
   }
 }
 ```
+
+**Note**: When using queue mode, you can poll the job status using the job key format: `chat:{session_id}:{message_id}`. The result will be stored in Redis with the job status "completed" when processing finishes.
 
 #### GET `/api/chat/session`
 
