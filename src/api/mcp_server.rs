@@ -60,11 +60,7 @@ pub async fn serve_mcp(
         snapchain_client,
     )));
 
-    // Create session manager (1 hour timeout)
-    let session_manager = Arc::new(crate::api::session::SessionManager::new(3600));
-    info!("Session manager initialized (timeout: 1 hour)");
-
-    // Initialize Redis client if configured
+    // Initialize Redis client (required for session management)
     let redis_client = if let Some(redis_cfg) = &config.redis {
         info!("🔧 Initializing Redis client...");
         match crate::api::redis_client::RedisClient::connect(redis_cfg) {
@@ -74,13 +70,25 @@ pub async fn serve_mcp(
             }
             Err(e) => {
                 tracing::error!("❌ Failed to connect to Redis: {}", e);
-                None
+                return Err(crate::SnapRagError::Custom(format!(
+                    "Redis is required for session management: {}",
+                    e
+                )));
             }
         }
     } else {
-        info!("⚠️ Redis not configured, skipping Redis client initialization");
-        None
+        return Err(crate::SnapRagError::Custom(
+            "Redis configuration is required for session management".to_string(),
+        ));
     };
+
+    // Create session manager (1 hour timeout) - requires Redis
+    let redis_client_for_session = redis_client.as_ref().unwrap().clone();
+    let session_manager = Arc::new(crate::api::session::SessionManager::new(
+        3600,
+        redis_client_for_session,
+    ));
+    info!("✅ Session manager initialized (timeout: 1 hour)");
 
     // Initialize cache service
     info!("🔧 Initializing cache service...");
