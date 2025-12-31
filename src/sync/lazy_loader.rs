@@ -254,18 +254,20 @@ impl LazyLoader {
                 let user_data_body = body
                     .get("userDataBody")
                     .or_else(|| body.get("user_data_body")); // Fallback for gRPC format
-                
+
                 if user_data_body.is_none() {
-                    debug!("No userDataBody found in body for FID {}. Available keys: {:?}", fid, body.keys().collect::<Vec<_>>());
+                    debug!(
+                        "No userDataBody found in body for FID {}. Available keys: {:?}",
+                        fid,
+                        body.keys().collect::<Vec<_>>()
+                    );
                 }
-                
+
                 if let Some(user_data_body) = user_data_body {
                     // Handle both string type (from HTTP API) and numeric type (from gRPC)
                     let type_value = user_data_body.get("type");
-                    let data_type = type_value
-                        .map(parse_user_data_type)
-                        .unwrap_or(0);
-                    
+                    let data_type = type_value.map(parse_user_data_type).unwrap_or(0);
+
                     let value = user_data_body
                         .get("value")
                         .and_then(|v| v.as_str())
@@ -274,7 +276,10 @@ impl LazyLoader {
 
                     // Debug logging for username
                     if data_type == 6 {
-                        debug!("Found username field for FID {}: type={:?}, value={}", fid, type_value, value);
+                        debug!(
+                            "Found username field for FID {}: type={:?}, value={}",
+                            fid, type_value, value
+                        );
                     }
 
                     // Update profile fields based on data type
@@ -293,7 +298,10 @@ impl LazyLoader {
                         10 => profile.banner_url = Some(value),
                         _ => {
                             if data_type != 0 {
-                                debug!("Unknown data type for FID {}: {:?} (value: {})", fid, type_value, value);
+                                debug!(
+                                    "Unknown data type for FID {}: {:?} (value: {})",
+                                    fid, type_value, value
+                                );
                             }
                         }
                     }
@@ -311,7 +319,10 @@ impl LazyLoader {
         // Save to database (upsert - safe for concurrent access)
         self.database.upsert_user_profile(&profile).await?;
 
-        info!("✅ Saved profile {} to database (username: {:?})", fid, profile.username);
+        info!(
+            "✅ Saved profile {} to database (username: {:?})",
+            fid, profile.username
+        );
         Ok(profile)
     }
 
@@ -367,18 +378,20 @@ impl LazyLoader {
                 let user_data_body = body
                     .get("userDataBody")
                     .or_else(|| body.get("user_data_body")); // Fallback for gRPC format
-                
+
                 if user_data_body.is_none() {
-                    debug!("No userDataBody found in body for FID {}. Available keys: {:?}", fid, body.keys().collect::<Vec<_>>());
+                    debug!(
+                        "No userDataBody found in body for FID {}. Available keys: {:?}",
+                        fid,
+                        body.keys().collect::<Vec<_>>()
+                    );
                 }
-                
+
                 if let Some(user_data_body) = user_data_body {
                     // Handle both string type (from HTTP API) and numeric type (from gRPC)
                     let type_value = user_data_body.get("type");
-                    let data_type = type_value
-                        .map(parse_user_data_type)
-                        .unwrap_or(0);
-                    
+                    let data_type = type_value.map(parse_user_data_type).unwrap_or(0);
+
                     let value = user_data_body
                         .get("value")
                         .and_then(|v| v.as_str())
@@ -387,7 +400,10 @@ impl LazyLoader {
 
                     // Debug logging for username
                     if data_type == 6 {
-                        debug!("Found username field for FID {}: type={:?}, value={}", fid, type_value, value);
+                        debug!(
+                            "Found username field for FID {}: type={:?}, value={}",
+                            fid, type_value, value
+                        );
                     }
 
                     // Update profile fields based on data type
@@ -406,7 +422,10 @@ impl LazyLoader {
                         10 => profile.banner_url = Some(value),
                         _ => {
                             if data_type != 0 {
-                                debug!("Unknown data type for FID {}: {:?} (value: {})", fid, type_value, value);
+                                debug!(
+                                    "Unknown data type for FID {}: {:?} (value: {})",
+                                    fid, type_value, value
+                                );
                             }
                         }
                     }
@@ -424,7 +443,10 @@ impl LazyLoader {
         // Save to database (upsert - safe for concurrent access)
         self.database.upsert_user_profile(&profile).await?;
 
-        info!("✅ Updated profile {} in database from Snapchain (username: {:?})", fid, profile.username);
+        info!(
+            "✅ Updated profile {} in database from Snapchain (username: {:?})",
+            fid, profile.username
+        );
         Ok(profile)
     }
 

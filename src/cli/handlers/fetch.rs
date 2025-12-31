@@ -45,7 +45,9 @@ pub async fn handle_fetch_user(
     let profile = lazy_loader
         .fetch_user_profile_force(fid)
         .await
-        .map_err(|e| crate::SnapRagError::Custom(format!("Failed to fetch user {fid} from Snapchain: {e}")))?;
+        .map_err(|e| {
+            crate::SnapRagError::Custom(format!("Failed to fetch user {fid} from Snapchain: {e}"))
+        })?;
 
     println!("\n✅ Profile loaded successfully:");
     println!("   FID: {}", profile.fid);
