@@ -25,7 +25,16 @@ impl Database {
             ("display_name", &profile.display_name),
             ("bio", &profile.bio),
             ("pfp_url", &profile.pfp_url),
+            ("banner_url", &profile.banner_url),
+            ("location", &profile.location),
             ("website_url", &profile.website_url),
+            ("twitter_username", &profile.twitter_username),
+            ("github_username", &profile.github_username),
+            (
+                "primary_address_ethereum",
+                &profile.primary_address_ethereum,
+            ),
+            ("primary_address_solana", &profile.primary_address_solana),
         ];
 
         for (field_name, field_value) in fields {
