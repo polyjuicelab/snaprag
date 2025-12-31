@@ -41,11 +41,13 @@ pub async fn handle_fetch_user(
 
     let lazy_loader = LazyLoader::new(database.clone(), snapchain_client);
 
-    // Smart fetch: check database first, only fetch if not found
+    // Always fetch from Snapchain and update database
     let profile = lazy_loader
-        .get_user_profile_smart(fid as i64)
-        .await?
-        .ok_or_else(|| crate::SnapRagError::Custom(format!("User {fid} not found")))?;
+        .fetch_user_profile_force(fid)
+        .await
+        .map_err(|e| {
+            crate::SnapRagError::Custom(format!("Failed to fetch user {fid} from Snapchain: {e}"))
+        })?;
 
     println!("\n✅ Profile loaded successfully:");
     println!("   FID: {}", profile.fid);
