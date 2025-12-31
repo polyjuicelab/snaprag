@@ -22,6 +22,32 @@ use crate::models::Cast;
 use crate::models::UserProfile;
 use crate::sync::client::SnapchainClient;
 
+/// Parse user data type from string or number
+/// Handles both HTTP API format (string: "USER_DATA_TYPE_USERNAME") and gRPC format (number: 6)
+fn parse_user_data_type(value: &serde_json::Value) -> i64 {
+    if let Some(type_str) = value.as_str() {
+        // Parse enum string to number
+        match type_str {
+            "USER_DATA_TYPE_PFP" | "USER_DATA_TYPE_PFP_URL" => 1,
+            "USER_DATA_TYPE_DISPLAY" | "USER_DATA_TYPE_DISPLAY_NAME" => 2,
+            "USER_DATA_TYPE_BIO" => 3,
+            "USER_DATA_TYPE_URL" | "USER_DATA_TYPE_WEBSITE_URL" => 5,
+            "USER_DATA_TYPE_USERNAME" => 6,
+            "USER_DATA_TYPE_LOCATION" => 7,
+            "USER_DATA_TYPE_TWITTER" => 8,
+            "USER_DATA_TYPE_GITHUB" => 9,
+            "USER_DATA_TYPE_BANNER" | "USER_DATA_TYPE_BANNER_URL" => 10,
+            "USER_DATA_TYPE_PRIMARY_ADDRESS_ETHEREUM" => 11,
+            "USER_DATA_TYPE_PRIMARY_ADDRESS_SOLANA" => 12,
+            "USER_DATA_TYPE_PROFILE_TOKEN" => 13,
+            _ => 0,
+        }
+    } else {
+        // Try as number (gRPC format)
+        value.as_i64().unwrap_or(0)
+    }
+}
+
 /// Cache for tracking lazy loading operations
 pub struct LazyLoadCache {
     /// FIDs currently being loaded
@@ -224,16 +250,32 @@ impl LazyLoader {
         for message in user_data_response.messages {
             if let Some(data) = &message.data {
                 let body = &data.body;
-                if let Some(user_data_body) = body.get("user_data_body") {
-                    let data_type = user_data_body
-                        .get("type")
-                        .and_then(serde_json::Value::as_i64)
+                // Snapchain HTTP API returns "userDataBody" (camelCase), not "user_data_body"
+                let user_data_body = body
+                    .get("userDataBody")
+                    .or_else(|| body.get("user_data_body")); // Fallback for gRPC format
+                
+                if user_data_body.is_none() {
+                    debug!("No userDataBody found in body for FID {}. Available keys: {:?}", fid, body.keys().collect::<Vec<_>>());
+                }
+                
+                if let Some(user_data_body) = user_data_body {
+                    // Handle both string type (from HTTP API) and numeric type (from gRPC)
+                    let type_value = user_data_body.get("type");
+                    let data_type = type_value
+                        .map(parse_user_data_type)
                         .unwrap_or(0);
+                    
                     let value = user_data_body
                         .get("value")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
+
+                    // Debug logging for username
+                    if data_type == 6 {
+                        debug!("Found username field for FID {}: type={:?}, value={}", fid, type_value, value);
+                    }
 
                     // Update profile fields based on data type
                     match data_type {
@@ -241,12 +283,19 @@ impl LazyLoader {
                         2 => profile.display_name = Some(value),
                         3 => profile.bio = Some(value),
                         5 => profile.website_url = Some(value),
-                        6 => profile.username = Some(value),
+                        6 => {
+                            debug!("Setting username for FID {} to: {}", fid, value);
+                            profile.username = Some(value);
+                        }
                         7 => profile.location = Some(value),
                         8 => profile.twitter_username = Some(value),
                         9 => profile.github_username = Some(value),
                         10 => profile.banner_url = Some(value),
-                        _ => {}
+                        _ => {
+                            if data_type != 0 {
+                                debug!("Unknown data type for FID {}: {:?} (value: {})", fid, type_value, value);
+                            }
+                        }
                     }
 
                     // Update timestamp to latest
@@ -262,7 +311,120 @@ impl LazyLoader {
         // Save to database (upsert - safe for concurrent access)
         self.database.upsert_user_profile(&profile).await?;
 
-        info!("✅ Saved profile {} to database", fid);
+        info!("✅ Saved profile {} to database (username: {:?})", fid, profile.username);
+        Ok(profile)
+    }
+
+    /// Force fetch user profile from Snapchain and update database
+    /// This always fetches from Snapchain, even if profile exists in database
+    pub async fn fetch_user_profile_force(&self, fid: u64) -> Result<UserProfile> {
+        info!("⚡ Force fetching profile {} from Snapchain...", fid);
+
+        // Fetch from Snapchain
+        let user_data_response = self
+            .snapchain_client
+            .get_user_data_by_fid(fid, None)
+            .await?;
+
+        if user_data_response.messages.is_empty() {
+            return Err(crate::errors::SnapRagError::Custom(format!(
+                "User {fid} not found on Snapchain"
+            )));
+        }
+
+        // Build profile from messages
+        #[allow(clippy::cast_possible_wrap)] // FID values in Farcaster never exceed i64::MAX
+        let mut profile = UserProfile {
+            fid: fid as i64,
+            username: None,
+            display_name: None,
+            bio: None,
+            pfp_url: None,
+            banner_url: None,
+            location: None,
+            website_url: None,
+            twitter_username: None,
+            github_username: None,
+            primary_address_ethereum: None,
+            primary_address_solana: None,
+            profile_token: None,
+            profile_embedding: None,
+            bio_embedding: None,
+            interests_embedding: None,
+            last_updated_timestamp: 0,
+            last_updated_at: chrono::Utc::now(),
+            id: uuid::Uuid::new_v4(),
+            shard_id: None,
+            block_height: None,
+            transaction_fid: None,
+        };
+
+        // Parse messages and extract latest values
+        for message in user_data_response.messages {
+            if let Some(data) = &message.data {
+                let body = &data.body;
+                // Snapchain HTTP API returns "userDataBody" (camelCase), not "user_data_body"
+                let user_data_body = body
+                    .get("userDataBody")
+                    .or_else(|| body.get("user_data_body")); // Fallback for gRPC format
+                
+                if user_data_body.is_none() {
+                    debug!("No userDataBody found in body for FID {}. Available keys: {:?}", fid, body.keys().collect::<Vec<_>>());
+                }
+                
+                if let Some(user_data_body) = user_data_body {
+                    // Handle both string type (from HTTP API) and numeric type (from gRPC)
+                    let type_value = user_data_body.get("type");
+                    let data_type = type_value
+                        .map(parse_user_data_type)
+                        .unwrap_or(0);
+                    
+                    let value = user_data_body
+                        .get("value")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    // Debug logging for username
+                    if data_type == 6 {
+                        debug!("Found username field for FID {}: type={:?}, value={}", fid, type_value, value);
+                    }
+
+                    // Update profile fields based on data type
+                    match data_type {
+                        1 => profile.pfp_url = Some(value),
+                        2 => profile.display_name = Some(value),
+                        3 => profile.bio = Some(value),
+                        5 => profile.website_url = Some(value),
+                        6 => {
+                            debug!("Setting username for FID {} to: {}", fid, value);
+                            profile.username = Some(value);
+                        }
+                        7 => profile.location = Some(value),
+                        8 => profile.twitter_username = Some(value),
+                        9 => profile.github_username = Some(value),
+                        10 => profile.banner_url = Some(value),
+                        _ => {
+                            if data_type != 0 {
+                                debug!("Unknown data type for FID {}: {:?} (value: {})", fid, type_value, value);
+                            }
+                        }
+                    }
+
+                    // Update timestamp to latest
+                    #[allow(clippy::cast_possible_wrap)]
+                    // Farcaster timestamps never exceed i64::MAX
+                    if data.timestamp as i64 > profile.last_updated_timestamp {
+                        profile.last_updated_timestamp = data.timestamp as i64;
+                    }
+                }
+            }
+        }
+
+        // Save to database (upsert - safe for concurrent access)
+        self.database.upsert_user_profile(&profile).await?;
+
+        info!("✅ Updated profile {} in database from Snapchain (username: {:?})", fid, profile.username);
         Ok(profile)
     }
 
