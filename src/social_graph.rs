@@ -55,6 +55,7 @@ pub struct UserMention {
     pub fid: i64,
     pub username: Option<String>,
     pub display_name: Option<String>,
+    pub pfp_url: Option<String>,
     pub count: usize,
     pub category: String, // "tech", "creator", "web3", etc.
 }
@@ -784,6 +785,7 @@ impl SocialGraphAnalyzer {
                 fid: mentioned_fid,
                 username: profile.and_then(|p| p.username.clone()),
                 display_name: profile.and_then(|p| p.display_name.clone()),
+                pfp_url: profile.and_then(|p| p.pfp_url.clone()),
                 count,
                 category: "unknown".to_string(), // Skip expensive categorize_user call
             });
@@ -837,6 +839,7 @@ impl SocialGraphAnalyzer {
                 fid,
                 username: profile.and_then(|p| p.username.clone()),
                 display_name: profile.and_then(|p| p.display_name.clone()),
+                pfp_url: profile.and_then(|p| p.pfp_url.clone()),
                 count: 1,
                 category: "unknown".to_string(), // Skip expensive categorize_user call
             });
