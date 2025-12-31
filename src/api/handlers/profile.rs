@@ -301,10 +301,10 @@ async fn build_profile_response(
     }
 }
 
-/// Get profile by FID (with automatic lazy loading and caching)
+/// Get profile by FID (always fetches from Snapchain and updates database)
 ///
 /// # Errors
-/// Returns an error if database queries fail or API calls fail without fallback
+/// Returns an error if Snapchain API calls fail or database update fails
 pub async fn get_profile(
     State(state): State<AppState>,
     Path(fid): Path<i64>,
@@ -312,47 +312,61 @@ pub async fn get_profile(
     let start_time = std::time::Instant::now();
     info!("GET /api/profiles/{}", fid);
 
-    // Check cache first if enabled
-    if let Some(cached_response) = check_profile_cache(&state.cache_service, fid, start_time).await
-    {
-        return cached_response;
-    }
-
-    // Try database first
-    let profile = match state.database.get_user_profile(fid).await {
-        Ok(Some(p)) => Some(p),
-        Ok(None) => {
-            // Try lazy loading if available
-            if let Some(loader) = &state.lazy_loader {
-                info!("⚡ Profile {} not found, attempting lazy load", fid);
-                if let Ok(fid_val) = u64::try_from(fid) {
-                    match loader.fetch_user_profile(fid_val).await {
-                        Ok(p) => {
-                            info!("✅ Successfully lazy loaded profile {}", fid);
+    // Always fetch from Snapchain and update database
+    let profile = if let Some(loader) = &state.lazy_loader {
+        if let Ok(fid_val) = u64::try_from(fid) {
+            match loader.fetch_user_profile_force(fid_val).await {
+                Ok(p) => {
+                    info!(
+                        "✅ Successfully fetched and updated profile {} from Snapchain",
+                        fid
+                    );
+                    Some(p)
+                }
+                Err(e) => {
+                    error!("Failed to fetch profile {} from Snapchain: {}", fid, e);
+                    // Fallback to database if Snapchain fails
+                    match state.database.get_user_profile(fid).await {
+                        Ok(Some(p)) => {
+                            warn!(
+                                "Using cached profile {} from database (Snapchain fetch failed)",
+                                fid
+                            );
                             Some(p)
                         }
-                        Err(e) => {
-                            info!("Failed to lazy load profile {}: {}", fid, e);
+                        Ok(None) => None,
+                        Err(db_err) => {
+                            error!("Database error while fetching profile {}: {}", fid, db_err);
                             None
                         }
                     }
-                } else {
-                    error!("FID {} is negative, cannot lazy load", fid);
-                    None
                 }
-            } else {
-                None
+            }
+        } else {
+            error!("FID {} is negative, cannot fetch from Snapchain", fid);
+            // Fallback to database
+            match state.database.get_user_profile(fid).await {
+                Ok(Some(p)) => Some(p),
+                Ok(None) => None,
+                Err(e) => {
+                    error!("Database error: {}", e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
             }
         }
-        Err(e) => {
-            error!("Error fetching profile: {}", e);
-            let duration = start_time.elapsed();
-            info!(
-                "❌ GET /api/profiles/{} - {}ms - 500",
-                fid,
-                duration.as_millis()
-            );
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    } else {
+        // No lazy loader available, fallback to database
+        warn!(
+            "Lazy loader not available, falling back to database for FID {}",
+            fid
+        );
+        match state.database.get_user_profile(fid).await {
+            Ok(Some(p)) => Some(p),
+            Ok(None) => None,
+            Err(e) => {
+                error!("Database error: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
         }
     };
 
@@ -368,7 +382,7 @@ pub async fn get_profile(
 
         let duration = start_time.elapsed();
         info!(
-            "✅ GET /api/profiles/{} - {}ms - 200 (cached)",
+            "✅ GET /api/profiles/{} - {}ms - 200",
             fid,
             duration.as_millis()
         );
