@@ -7,6 +7,7 @@ use tracing::info;
 use crate::config::AppConfig;
 use crate::database::Database;
 use crate::sync::client::SnapchainClient;
+use crate::sync::hooks::HookManager;
 use crate::sync::lock_file::SyncLockFile;
 use crate::sync::lock_file::SyncLockManager;
 use crate::sync::shard_processor::ShardProcessor;
@@ -43,6 +44,15 @@ pub struct SyncService {
 impl SyncService {
     /// Create a new sync service
     pub async fn new(app_config: &AppConfig, database: Arc<Database>) -> Result<Self> {
+        Self::new_with_hooks(app_config, database, None).await
+    }
+
+    /// Create a new sync service with optional hook manager
+    pub async fn new_with_hooks(
+        app_config: &AppConfig,
+        database: Arc<Database>,
+        hook_manager: Option<Arc<HookManager>>,
+    ) -> Result<Self> {
         info!("Initializing SnapRAG sync service...");
 
         // Initialize sync configuration
@@ -83,7 +93,11 @@ impl SyncService {
             lock_manager.clone(),
         );
 
-        let coordinator = SyncCoordinator::new(client.clone(), database.clone());
+        let coordinator = if let Some(hm) = hook_manager.clone() {
+            SyncCoordinator::with_hooks(client.clone(), database.clone(), hm)
+        } else {
+            SyncCoordinator::new(client.clone(), database.clone())
+        };
 
         let monitor = RealtimeMonitor::new(
             client.clone(),

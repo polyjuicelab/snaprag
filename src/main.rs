@@ -539,6 +539,25 @@ async fn main() -> Result<()> {
             ServeCommands::Status { queue, job } => {
                 snaprag::cli::handle_worker_status(&config, queue, job).await?;
             }
+            ServeCommands::Hook {
+                event_type,
+                url,
+                regex,
+                fid,
+                target_fid,
+                onchain_event_type,
+            } => {
+                snaprag::cli::handle_serve_hook(
+                    &config,
+                    event_type,
+                    url,
+                    regex,
+                    fid,
+                    target_fid,
+                    onchain_event_type,
+                )
+                .await?;
+            }
         },
         Commands::Task(task_cmd) => match task_cmd {
             snaprag::cli::commands::TaskCommands::List {
