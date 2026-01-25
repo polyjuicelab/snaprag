@@ -651,7 +651,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // Requires GPU and model download
+    #[ignore = "Requires GPU and model download"]
     async fn test_bge_embedding() {
         let client = LocalGPUClient::new("BAAI/bge-small-en-v1.5").await.unwrap();
         let embedding = client.generate("What is machine learning?").await.unwrap();

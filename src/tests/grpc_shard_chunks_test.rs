@@ -494,7 +494,7 @@ async fn test_parse_shard_chunks_response_real_blocks_0_to_7() {
             "Transactions with messages must not exceed total"
         );
         assert!(
-            total_user_messages < 100000,
+            total_user_messages < 100_000,
             "Total user messages must be reasonable"
         );
     }
@@ -563,7 +563,7 @@ async fn test_parse_shard_chunks_response_real_block_9_with_fid_zero() {
 }
 
 #[test]
-#[ignore] // Mock test - kept for reference but not run by default
+#[ignore = "Mock test - kept for reference but not run by default"]
 fn test_parse_shard_chunks_response_mock() {
     // This test uses mock data for protobuf serialization validation
     // Real integration tests are in integration_sync_test.rs
@@ -590,7 +590,7 @@ fn test_parse_shard_chunks_response_mock() {
         height.shard_index = 1;
         height.block_number = block_num;
         header.height = Some(height);
-        header.timestamp = 1640995200 + block_num * 4; // Mock timestamp
+        header.timestamp = 1_640_995_200 + block_num * 4; // Mock timestamp
         header.parent_hash = vec![0u8; 32]; // Mock parent hash
         header.shard_root = vec![0u8; 32]; // Mock shard root
         shard_chunk.header = Some(header);
@@ -610,7 +610,7 @@ fn test_parse_shard_chunks_response_mock() {
             let mut data = MessageData::default();
             data.r#type = MessageType::CastAdd as i32;
             data.fid = fid;
-            data.timestamp = (1640995200 + block_num * 4) as u32;
+            data.timestamp = (1_640_995_200 + block_num * 4) as u32;
             data.network = FarcasterNetwork::Mainnet as i32;
 
             let mut cast_add_body = CastAddBody::default();
@@ -702,7 +702,7 @@ fn test_parse_shard_chunks_response_mock() {
         );
         assert_eq!(
             chunk.header.as_ref().unwrap().timestamp,
-            1640995200 + expected_block_num * 4
+            1_640_995_200 + expected_block_num * 4
         );
 
         // Verify hash

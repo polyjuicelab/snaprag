@@ -261,10 +261,10 @@ pub async fn handle_mbti_command(config: &AppConfig, command: &MbtiCommands) -> 
             handle_mbti_batch(config, fids.clone(), output.clone()).await?;
         }
         MbtiCommands::Stats { output } => {
-            handle_mbti_stats(config, output.clone()).await?;
+            handle_mbti_stats(config, output.clone())?;
         }
         MbtiCommands::Search { mbti_type, output } => {
-            handle_mbti_search(config, mbti_type.clone(), output.clone()).await?;
+            handle_mbti_search(config, mbti_type.clone(), output.clone())?;
         }
         MbtiCommands::Compatibility {
             user1,
@@ -359,7 +359,7 @@ async fn handle_mbti_batch(
 }
 
 /// Handle MBTI stats
-async fn handle_mbti_stats(config: &AppConfig, output: Option<String>) -> Result<()> {
+fn handle_mbti_stats(config: &AppConfig, output: Option<String>) -> Result<()> {
     // This would require storing MBTI results in database
     // For now, return placeholder
     let response = serde_json::json!({
@@ -373,11 +373,7 @@ async fn handle_mbti_stats(config: &AppConfig, output: Option<String>) -> Result
 }
 
 /// Handle MBTI search
-async fn handle_mbti_search(
-    config: &AppConfig,
-    mbti_type: String,
-    output: Option<String>,
-) -> Result<()> {
+fn handle_mbti_search(config: &AppConfig, mbti_type: String, output: Option<String>) -> Result<()> {
     // Validate MBTI type
     let mbti_upper = mbti_type.to_uppercase();
     if mbti_upper.len() != 4 {

@@ -11,6 +11,7 @@ use tracing::info;
 use uuid::Uuid;
 
 use super::AppState;
+use crate::api::session::ChatSession;
 use crate::api::types::ApiResponse;
 use crate::api::types::ChatMessageRequest;
 use crate::api::types::ChatMessageResponse;
@@ -18,6 +19,8 @@ use crate::api::types::CreateChatRequest;
 use crate::api::types::CreateChatResponse;
 use crate::api::types::GetSessionRequest;
 use crate::api::types::SessionInfoResponse;
+use crate::models::CastSearchResult;
+use crate::models::UserProfile;
 
 /// Parse user identifier (FID or username) and return FID
 async fn parse_user_identifier(
@@ -51,14 +54,69 @@ async fn parse_user_identifier(
     }
 }
 
+const BUILD_PHRASES: [&str; 10] = [
+    "building",
+    "working on",
+    "developing",
+    "coding",
+    "shipping",
+    "launching",
+    "released",
+    "deployed",
+    "just built",
+    "working on a",
+];
+const LEARN_PHRASES: [&str; 7] = [
+    "learning",
+    "studying",
+    "reading about",
+    "exploring",
+    "trying out",
+    "experimenting",
+    "figuring out",
+];
+const PROJECT_PHRASES: [&str; 7] = [
+    "project", "app", "protocol", "dapp", "product", "feature", "tool",
+];
+const COMMUNITY_PHRASES: [&str; 6] = [
+    "community",
+    "team",
+    "collaboration",
+    "working with",
+    "partnership",
+    "together with",
+];
+const TECH_KEYWORDS: [(&str, &str); 13] = [
+    ("web3", "Web3"),
+    ("crypto", "crypto"),
+    ("blockchain", "blockchain"),
+    ("base", "Base"),
+    ("ethereum", "Ethereum"),
+    ("solidity", "Solidity"),
+    ("rust", "Rust"),
+    ("typescript", "TypeScript"),
+    ("react", "React"),
+    ("ai", "AI"),
+    ("ml", "machine learning"),
+    ("defi", "DeFi"),
+    ("nft", "NFTs"),
+];
+
+fn count_phrase_matches(text: &str, phrases: &[&str]) -> usize {
+    phrases
+        .iter()
+        .map(|phrase| text.matches(phrase).count())
+        .sum::<usize>()
+}
+
 /// Analyze recent activity from casts to understand what user is working on
-fn analyze_recent_activity(casts: &[crate::models::CastSearchResult]) -> String {
+fn analyze_recent_activity(casts: &[CastSearchResult]) -> String {
     if casts.is_empty() {
         return String::new();
     }
 
     // Get most recent casts (last 10-20 for activity analysis)
-    let recent_casts: Vec<&crate::models::CastSearchResult> = casts.iter().take(20).collect();
+    let recent_casts: Vec<&CastSearchResult> = casts.iter().take(20).collect();
 
     // Combine text from recent casts (preserve case for better analysis)
     let all_text_lower: String = recent_casts
@@ -71,96 +129,35 @@ fn analyze_recent_activity(casts: &[crate::models::CastSearchResult]) -> String 
     let mut activity_parts = Vec::new();
 
     // Detect building/development activities
-    let build_phrases = [
-        "building",
-        "working on",
-        "developing",
-        "coding",
-        "shipping",
-        "launching",
-        "released",
-        "deployed",
-        "just built",
-        "working on a",
-    ];
-    let build_count = build_phrases
-        .iter()
-        .map(|phrase| all_text_lower.matches(phrase).count())
-        .sum::<usize>();
+    let build_count = count_phrase_matches(&all_text_lower, &BUILD_PHRASES);
 
     if build_count > 0 {
         activity_parts.push("actively building/developing".to_string());
     }
 
     // Detect learning activities
-    let learn_phrases = [
-        "learning",
-        "studying",
-        "reading about",
-        "exploring",
-        "trying out",
-        "experimenting",
-        "figuring out",
-    ];
-    let learn_count = learn_phrases
-        .iter()
-        .map(|phrase| all_text_lower.matches(phrase).count())
-        .sum::<usize>();
+    let learn_count = count_phrase_matches(&all_text_lower, &LEARN_PHRASES);
 
     if learn_count > 0 {
         activity_parts.push("learning/exploring new things".to_string());
     }
 
     // Detect project/product work
-    let project_phrases = [
-        "project", "app", "protocol", "dapp", "product", "feature", "tool",
-    ];
-    let project_count = project_phrases
-        .iter()
-        .map(|phrase| all_text_lower.matches(phrase).count())
-        .sum::<usize>();
+    let project_count = count_phrase_matches(&all_text_lower, &PROJECT_PHRASES);
 
     if project_count > 2 {
         activity_parts.push("working on projects/products".to_string());
     }
 
     // Detect community engagement
-    let community_phrases = [
-        "community",
-        "team",
-        "collaboration",
-        "working with",
-        "partnership",
-        "together with",
-    ];
-    let community_count = community_phrases
-        .iter()
-        .map(|phrase| all_text_lower.matches(phrase).count())
-        .sum::<usize>();
+    let community_count = count_phrase_matches(&all_text_lower, &COMMUNITY_PHRASES);
 
     if community_count > 0 {
         activity_parts.push("engaged with community/teams".to_string());
     }
 
-    // Extract specific technologies/topics mentioned frequently
-    let tech_keywords = [
-        ("web3", "Web3"),
-        ("crypto", "crypto"),
-        ("blockchain", "blockchain"),
-        ("base", "Base"),
-        ("ethereum", "Ethereum"),
-        ("solidity", "Solidity"),
-        ("rust", "Rust"),
-        ("typescript", "TypeScript"),
-        ("react", "React"),
-        ("ai", "AI"),
-        ("ml", "machine learning"),
-        ("defi", "DeFi"),
-        ("nft", "NFTs"),
-    ];
-
     let mut mentioned_techs = Vec::new();
-    for (keyword, display) in &tech_keywords {
+    for (keyword, display) in &TECH_KEYWORDS {
         let count = all_text_lower.matches(keyword).count();
         if count > 0 {
             mentioned_techs.push(*display);
@@ -195,15 +192,7 @@ fn analyze_recent_activity(casts: &[crate::models::CastSearchResult]) -> String 
     summary
 }
 
-/// Build chat context for LLM
-pub fn build_chat_context(
-    profile: &crate::models::UserProfile,
-    casts: &[crate::models::CastSearchResult],
-    session: &crate::api::session::ChatSession,
-    message: &str,
-) -> String {
-    let mut context = String::new();
-
+fn write_identity_header(context: &mut String, profile: &UserProfile) {
     write!(
         context,
         "You ARE {}, a Farcaster user",
@@ -220,27 +209,29 @@ pub fn build_chat_context(
     context.push_str("🚫 CRITICAL: You MUST respond AS THIS USER, not as an AI or assistant.\n");
     context.push_str("❌ NEVER use format markers like \"User:\", \"Me:\", \"assistant:\", or any role labels.\n");
     context.push_str("✅ Respond DIRECTLY as if you are posting on Farcaster - just your message, nothing else.\n\n");
+}
 
-    // Build comprehensive identity section
+fn append_identity_section(
+    context: &mut String,
+    profile: &UserProfile,
+    casts: &[CastSearchResult],
+) {
     context.push_str("═══════════════════════════════════════════════════════\n");
     context.push_str("👤 YOUR IDENTITY - WHO YOU ARE\n");
     context.push_str("═══════════════════════════════════════════════════════\n\n");
 
-    // Bio contains important identity information
     if let Some(bio) = &profile.bio {
         if !bio.trim().is_empty() {
             write!(context, "About you: {bio}\n\n").unwrap();
         }
     }
 
-    // Add location if available (helps with context)
     if let Some(location) = &profile.location {
         if !location.trim().is_empty() {
             write!(context, "Location: {location}\n\n").unwrap();
         }
     }
 
-    // Add professional/online presence (indicates role/interests)
     let mut professional_info = Vec::new();
     if let Some(website) = &profile.website_url {
         if !website.trim().is_empty() {
@@ -263,7 +254,6 @@ pub fn build_chat_context(
         context.push_str("\n\n");
     }
 
-    // Analyze what user is working on/doing from casts
     if !casts.is_empty() {
         let recent_activity = analyze_recent_activity(casts);
         if !recent_activity.is_empty() {
@@ -277,82 +267,108 @@ pub fn build_chat_context(
     context.push_str("Reference your work, interests, and current activities when relevant, ");
     context.push_str("but keep it authentic to how you actually communicate.\n\n");
     context.push_str("═══════════════════════════════════════════════════════\n\n");
+}
 
-    // Add writing style analysis and examples
-    if !casts.is_empty() {
-        let avg_length: usize =
-            casts.iter().map(|c| c.text.len()).sum::<usize>() / casts.len().max(1);
+fn append_style_examples(context: &mut String, casts: &[CastSearchResult]) {
+    if casts.is_empty() {
+        return;
+    }
 
-        context.push_str("\n═══════════════════════════════════════════════════════\n");
-        context.push_str("🎭 YOUR WRITING STYLE - STUDY THESE EXAMPLES CAREFULLY\n");
-        context.push_str("═══════════════════════════════════════════════════════\n\n");
+    let avg_length: usize = casts.iter().map(|c| c.text.len()).sum::<usize>() / casts.len().max(1);
 
-        context.push_str("These are YOUR actual posts. This is HOW YOU WRITE:\n\n");
-        for (idx, result) in casts.iter().take(15).enumerate() {
-            writeln!(context, "{}. \"{}\"", idx + 1, result.text).unwrap();
-        }
+    context.push_str("\n═══════════════════════════════════════════════════════\n");
+    context.push_str("🎭 YOUR WRITING STYLE - STUDY THESE EXAMPLES CAREFULLY\n");
+    context.push_str("═══════════════════════════════════════════════════════\n\n");
 
-        context.push_str("\n─────────────────────────────────────────────────────\n");
-        context.push_str("📊 STYLE ANALYSIS\n");
-        context.push_str("─────────────────────────────────────────────────────\n");
-        write!(context, "Average length: {avg_length} characters\n\n").unwrap();
+    context.push_str("These are YOUR actual posts. This is HOW YOU WRITE:\n\n");
+    for (idx, result) in casts.iter().take(15).enumerate() {
+        writeln!(context, "{}. \"{}\"", idx + 1, result.text).unwrap();
+    }
 
-        context.push_str("🎯 CRITICAL RULES:\n\n");
+    context.push_str("\n─────────────────────────────────────────────────────\n");
+    context.push_str("📊 STYLE ANALYSIS\n");
+    context.push_str("─────────────────────────────────────────────────────\n");
+    write!(context, "Average length: {avg_length} characters\n\n").unwrap();
 
-        if avg_length < 50 {
-            context.push_str(
-                "⚠️ ULTRA-SHORT: Response MUST be under 50 characters. 1 sentence max.\n",
-            );
-        } else if avg_length < 100 {
-            context.push_str("⚠️ CONCISE: Keep under 100 chars. 1-2 short sentences only.\n");
-        } else if avg_length < 200 {
-            context.push_str("📝 MODERATE: 100-200 chars. 2-3 sentences max.\n");
+    context.push_str("🎯 CRITICAL RULES:\n\n");
+
+    if avg_length < 50 {
+        context.push_str("⚠️ ULTRA-SHORT: Response MUST be under 50 characters. 1 sentence max.\n");
+    } else if avg_length < 100 {
+        context.push_str("⚠️ CONCISE: Keep under 100 chars. 1-2 short sentences only.\n");
+    } else if avg_length < 200 {
+        context.push_str("📝 MODERATE: 100-200 chars. 2-3 sentences max.\n");
+    } else {
+        context.push_str("📚 DETAILED: 200-300 chars. Thoughtful explanations okay.\n");
+    }
+
+    context.push_str("\n1. MATCH LENGTH shown in examples\n");
+    context.push_str("2. USE SAME vocabulary and phrases\n");
+    context.push_str("3. COPY tone (casual/professional/technical)\n");
+    context.push_str("4. EMOJIS: If examples have them, USE THEM. If not, DON'T.\n");
+    context.push_str("5. MATCH punctuation (!,?, etc.)\n");
+    context.push_str("6. KEEP slang if present (lol, fr, ngl, etc.)\n");
+    context.push_str(
+        "7. NEVER include \"User:\", \"Me:\", \"assistant:\" or any role labels in your response\n",
+    );
+    context.push_str(
+        "8. Respond as if you are directly posting - no formatting, no labels, just your words\n\n",
+    );
+
+    context.push_str("⚡ Ask: \"Does this sound EXACTLY like my examples?\"\n");
+    context.push_str(
+        "⚡ Ask: \"Am I using any role labels or format markers?\" If yes, REMOVE THEM.\n\n",
+    );
+    context.push_str("═══════════════════════════════════════════════════════\n\n");
+}
+
+fn append_conversation_history(context: &mut String, session: &ChatSession) {
+    if session.conversation_history.is_empty() {
+        return;
+    }
+
+    context.push_str("Previous conversation:\n\n");
+    for message in &session.conversation_history {
+        if message.role == "user" {
+            writeln!(context, "They asked: {}", message.content).unwrap();
         } else {
-            context.push_str("📚 DETAILED: 200-300 chars. Thoughtful explanations okay.\n");
+            writeln!(context, "You replied: {}", message.content).unwrap();
         }
-
-        context.push_str("\n1. MATCH LENGTH shown in examples\n");
-        context.push_str("2. USE SAME vocabulary and phrases\n");
-        context.push_str("3. COPY tone (casual/professional/technical)\n");
-        context.push_str("4. EMOJIS: If examples have them, USE THEM. If not, DON'T.\n");
-        context.push_str("5. MATCH punctuation (!,?, etc.)\n");
-        context.push_str("6. KEEP slang if present (lol, fr, ngl, etc.)\n");
-        context.push_str("7. NEVER include \"User:\", \"Me:\", \"assistant:\" or any role labels in your response\n");
-        context.push_str("8. Respond as if you are directly posting - no formatting, no labels, just your words\n\n");
-
-        context.push_str("⚡ Ask: \"Does this sound EXACTLY like my examples?\"\n");
-        context.push_str(
-            "⚡ Ask: \"Am I using any role labels or format markers?\" If yes, REMOVE THEM.\n\n",
-        );
-        context.push_str("═══════════════════════════════════════════════════════\n\n");
     }
+    context.push('\n');
+}
 
-    // Add conversation history if available
-    if !session.conversation_history.is_empty() {
-        context.push_str("Previous conversation:\n\n");
-        for message in &session.conversation_history {
-            // Format history without role labels to avoid AI mimicking them
-            if message.role == "user" {
-                writeln!(context, "They asked: {}", message.content).unwrap();
-            } else {
-                writeln!(context, "You replied: {}", message.content).unwrap();
-            }
-        }
-        context.push('\n');
-    }
-
+fn append_question_prompt(context: &mut String, message: &str) {
     context.push_str("═══ THE QUESTION ═══\n\n");
     write!(context, "They asked: {message}\n\n").unwrap();
     context.push_str(
         "🚫 REMEMBER: Respond DIRECTLY as yourself. NO \"User:\", NO \"Me:\", NO labels.\n",
     );
     context.push_str("✅ Just write your response exactly as you would post it on Farcaster:\n\n");
+}
+
+/// Build chat context for LLM
+#[must_use]
+pub fn build_chat_context(
+    profile: &UserProfile,
+    casts: &[CastSearchResult],
+    session: &ChatSession,
+    message: &str,
+) -> String {
+    let mut context = String::new();
+
+    write_identity_header(&mut context, profile);
+    append_identity_section(&mut context, profile, casts);
+    append_style_examples(&mut context, casts);
+    append_conversation_history(&mut context, session);
+    append_question_prompt(&mut context, message);
 
     context
 }
 
 /// Clean response text to remove any format markers or role labels
 /// This ensures AI responses don't include unwanted format markers like "User:", "Me:", etc.
+#[must_use]
 pub fn clean_response_text(text: &str) -> String {
     let mut cleaned = text.trim().to_string();
 
@@ -751,7 +767,7 @@ pub async fn delete_chat_session(
     info!("DELETE /api/chat/session/{}", session_id);
 
     match state.session_manager.delete_session(&session_id).await {
-        Ok(_) => Ok(Json(ApiResponse::success("Session deleted".to_string()))),
+        Ok(()) => Ok(Json(ApiResponse::success("Session deleted".to_string()))),
         Err(e) => {
             error!("Failed to delete session: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
