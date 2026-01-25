@@ -284,10 +284,11 @@ impl SnapchainClient {
         request: proto::ShardChunksRequest,
     ) -> Result<proto::ShardChunksResponse> {
         // Convert our internal proto request to gRPC client request
-        let mut grpc_request = crate::generated::grpc_client::ShardChunksRequest::default();
-        grpc_request.shard_id = request.shard_id;
-        grpc_request.start_block_number = request.start_block_number;
-        grpc_request.stop_block_number = request.stop_block_number;
+        let grpc_request = crate::generated::grpc_client::ShardChunksRequest {
+            shard_id: request.shard_id,
+            start_block_number: request.start_block_number,
+            stop_block_number: request.stop_block_number,
+        };
 
         // Make the gRPC call using tonic::Request wrapper
         let mut grpc_client = self.grpc_client.clone();
@@ -417,9 +418,11 @@ impl SnapchainClient {
     ) -> Result<LinksByTargetFidResponse> {
         let mut grpc_client = self.grpc_client.clone();
 
-        let mut request = crate::generated::grpc_client::LinksByFidRequest::default();
-        request.fid = fid;
-        request.link_type = Some(link_type.to_string());
+        let mut request = crate::generated::grpc_client::LinksByFidRequest {
+            fid,
+            link_type: Some(link_type.to_string()),
+            ..Default::default()
+        };
         if let Some(size) = page_size {
             request.page_size = Some(size);
         }
@@ -671,8 +674,10 @@ impl SnapchainClient {
     ) -> Result<Vec<crate::generated::grpc_client::UserNameProof>> {
         let mut grpc_client = self.grpc_client.clone();
 
-        let mut request = crate::generated::grpc_client::FidRequest::default();
-        request.fid = fid;
+        let request = crate::generated::grpc_client::FidRequest {
+            fid,
+            ..Default::default()
+        };
 
         let response = grpc_client
             .get_user_name_proofs_by_fid(request)
@@ -699,8 +704,10 @@ impl SnapchainClient {
     ) -> Result<Option<crate::generated::grpc_client::OnChainEvent>> {
         let mut grpc_client = self.grpc_client.clone();
 
-        let mut request = crate::generated::grpc_client::FidRequest::default();
-        request.fid = fid;
+        let request = crate::generated::grpc_client::FidRequest {
+            fid,
+            ..Default::default()
+        };
 
         let response = grpc_client
             .get_id_registry_on_chain_event(request)

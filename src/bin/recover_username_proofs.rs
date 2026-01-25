@@ -1,11 +1,17 @@
-//! Binary to recover missing username_proofs from snapchain API
+//! Binary to recover missing `username_proofs` from snapchain API
 //!
-//! Usage: cargo run --bin recover_username_proofs [--fid <fid>] [--batch]
+//! Usage: cargo run --bin `recover_username_proofs` [--fid <fid>] [--batch]
 //!
 //! This script:
-//! 1. Identifies FIDs that have user_profiles but missing username_proofs
-//! 2. Calls snapchain API GetUserNameProofsByFid for each FID
-//! 3. Inserts recovered username_proofs into database
+//! 1. Identifies FIDs that have `user_profiles` but missing `username_proofs`
+//! 2. Calls snapchain API `GetUserNameProofsByFid` for each FID
+//! 3. Inserts recovered `username_proofs` into database
+#![allow(
+    clippy::items_after_statements,
+    clippy::too_many_lines,
+    clippy::significant_drop_tightening,
+    clippy::uninlined_format_args
+)]
 
 use snaprag::database::Database;
 use snaprag::models::ShardBlockInfo;
@@ -120,7 +126,8 @@ async fn main() -> Result<()> {
                     );
                 }
 
-                match recover_fid(&client, &database, *fid as u64).await {
+                let fid_u64 = u64::try_from(*fid).unwrap_or(0);
+                match recover_fid(&client, &database, fid_u64).await {
                     Ok(true) => {
                         success_count += 1;
                         batch_success += 1;
@@ -133,7 +140,7 @@ async fn main() -> Result<()> {
                         error_count += 1;
                         batch_error += 1;
                         if batch_error <= 5 {
-                            eprintln!("    ⚠️  Error recovering FID {}: {}", fid, e);
+                            eprintln!("    ⚠️  Error recovering FID {fid}: {e}");
                         }
                     }
                 }
@@ -155,22 +162,24 @@ async fn main() -> Result<()> {
             );
 
             // If this batch had fewer than BATCH_SIZE FIDs, we've reached the end
-            if missing_fids.len() < BATCH_SIZE as usize {
+            if missing_fids.len() < usize::try_from(BATCH_SIZE).unwrap_or(usize::MAX) {
                 println!("✅ Reached end of missing FIDs. All batches completed!\n");
                 break;
             }
         }
 
         println!("📋 Final Recovery Summary:");
-        println!("  Total batches processed: {}", batch_number);
-        println!("  Total FIDs processed: {}", total_processed);
-        println!("  Successfully recovered: {}", success_count);
-        println!("  Skipped (already exists or no proofs): {}", skipped_count);
-        println!("  Errors: {}", error_count);
+        println!("  Total batches processed: {batch_number}");
+        println!("  Total FIDs processed: {total_processed}");
+        println!("  Successfully recovered: {success_count}");
+        println!("  Skipped (already exists or no proofs): {skipped_count}");
+        println!("  Errors: {error_count}");
         println!(
             "  Success rate: {:.1}%",
             if total_processed > 0 {
-                (success_count as f64 / total_processed as f64) * 100.0
+                let total_processed_f64 =
+                    f64::from(u32::try_from(total_processed).unwrap_or(u32::MAX));
+                (f64::from(success_count) / total_processed_f64) * 100.0
             } else {
                 0.0
             }
@@ -188,7 +197,7 @@ async fn recover_fid(client: &SnapchainClient, database: &Database, fid: u64) ->
     // Check if we already have username_proofs for this FID
     let existing_count: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM username_proofs WHERE fid = $1")
-            .bind(fid as i64)
+            .bind(i64::try_from(fid).unwrap_or(i64::MAX))
             .fetch_one(database.pool())
             .await?;
 
@@ -201,7 +210,7 @@ async fn recover_fid(client: &SnapchainClient, database: &Database, fid: u64) ->
     let proofs = match client.get_username_proofs_by_fid(fid).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("  ❌ Failed to get username_proofs for FID {}: {}", fid, e);
+            eprintln!("  ❌ Failed to get username_proofs for FID {fid}: {e}");
             return Err(e);
         }
     };
@@ -236,25 +245,25 @@ async fn recover_fid(client: &SnapchainClient, database: &Database, fid: u64) ->
         // Use upsert to handle conflicts
         match database
             .upsert_username_proof(
-                proof.fid as i64,
+                i64::try_from(proof.fid).unwrap_or(i64::MAX),
                 username.clone(),
                 username_type,
                 proof.owner.clone(),
                 proof.signature.clone(),
-                proof.timestamp as i64,
+                i64::try_from(proof.timestamp).unwrap_or(i64::MAX),
             )
             .await
         {
             Ok(_) => {
                 // Only print for first few FIDs or when verbose
                 if fid <= 10 || fid.is_multiple_of(1000) {
-                    println!("    ✅ Inserted: {} (type: {:?})", username, username_type);
+                    println!("    ✅ Inserted: {username} (type: {username_type:?})");
                 }
             }
             Err(e) => {
                 // Only show errors for first few FIDs
                 if fid <= 10 {
-                    eprintln!("    ❌ Failed to insert {}: {}", username, e);
+                    eprintln!("    ❌ Failed to insert {username}: {e}");
                 }
             }
         }

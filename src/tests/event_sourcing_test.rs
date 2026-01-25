@@ -23,7 +23,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires database connection
+    #[ignore = "Requires database connection"]
     async fn test_event_sourcing_insert_and_query() {
         // This test verifies that the event-sourcing architecture works correctly
 
@@ -32,7 +32,7 @@ mod tests {
             .await
             .expect("Failed to connect to database");
 
-        let test_fid = 999999i64;
+        let test_fid = 999_999_i64;
         let timestamp1 = 1000i64;
         let timestamp2 = 2000i64;
 
@@ -136,7 +136,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires database connection
+    #[ignore = "Requires database connection"]
     async fn test_concurrent_inserts_no_locks() {
         // This test verifies that concurrent inserts don't cause lock contention
 
@@ -145,7 +145,7 @@ mod tests {
             .await
             .expect("Failed to connect to database");
 
-        let test_fid_base = 888888i64;
+        let test_fid_base = 888_888_i64;
         let num_concurrent = 10;
 
         // Spawn multiple concurrent insert tasks

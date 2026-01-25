@@ -14,7 +14,7 @@ async fn setup_test_db() -> Database {
         .expect("Failed to create database")
 }
 
-/// Helper to cleanup test data by message_hash
+/// Helper to cleanup test data by `message_hash`
 async fn cleanup_by_message_hash(db: &Database, message_hash: &[u8]) {
     let cleanup_queries = vec![
         "DELETE FROM casts WHERE message_hash = $1",
@@ -43,12 +43,12 @@ fn test_message_hash(test_id: u32) -> Vec<u8> {
 }
 
 /// Helper to create shard block info
-fn test_shard_info() -> ShardBlockInfo {
+const fn test_shard_info() -> ShardBlockInfo {
     ShardBlockInfo {
         shard_id: 1,
         block_height: 1000,
         transaction_fid: 99,
-        timestamp: 1698765432,
+        timestamp: 1_698_765_432,
     }
 }
 
@@ -67,7 +67,7 @@ async fn test_message_types_quick() {
     batched.casts.push((
         99,
         Some("Test cast".to_string()),
-        1698765432,
+        1_698_765_432,
         test_hash_1.clone(),
         None,
         None,
@@ -98,7 +98,7 @@ async fn test_message_types_quick() {
         100,
         "follow".to_string(),
         "add".to_string(), // event_type
-        1698765432,
+        1_698_765_432,
         test_hash_2.clone(),
         shard_info.clone(),
     ));
@@ -126,7 +126,7 @@ async fn test_message_types_quick() {
         vec![0x12; 20],
         vec![0x34; 65],
         1,
-        1698765432,
+        1_698_765_432,
         test_hash_3.clone(),
         shard_info.clone(),
     ));

@@ -99,7 +99,7 @@ mod tests {
 
     #[cfg(feature = "local-gpu")]
     #[tokio::test]
-    #[ignore] // Requires GPU hardware
+    #[ignore = "Requires GPU hardware"]
     async fn test_create_local_gpu_service() {
         let config = AppConfig::default();
         let result = create_local_gpu_service(&config, None).await;

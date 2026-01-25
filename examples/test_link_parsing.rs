@@ -29,12 +29,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test multiple block ranges to find links
     let test_ranges = vec![
-        (1, 100000, 100100),     // Early blocks
-        (1, 1000000, 1000100),   // Mid blocks
-        (1, 5000000, 5000100),   // Later blocks
-        (1, 10000000, 10000100), // Recent blocks
-        (2, 100000, 100100),     // Shard 2 early
-        (2, 10000000, 10000100), // Shard 2 recent
+        (1, 100_000, 100_100),       // Early blocks
+        (1, 1_000_000, 1_000_100),   // Mid blocks
+        (1, 5_000_000, 5_000_100),   // Later blocks
+        (1, 10_000_000, 10_000_100), // Recent blocks
+        (2, 100_000, 100_100),       // Shard 2 early
+        (2, 10_000_000, 10_000_100), // Shard 2 recent
     ];
 
     for (shard_id, start, end) in test_ranges {
