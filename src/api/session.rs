@@ -217,7 +217,7 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns error if Redis operation fails
-    pub async fn session_count(&self) -> crate::Result<usize> {
+    pub fn session_count(&self) -> crate::Result<usize> {
         // For now, return 0 as counting requires scanning all keys
         // Could implement a counter in Redis if needed
         Ok(0)
@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis instance
+    #[ignore = "Requires Redis instance"]
     async fn test_session_create_and_get() {
         let manager = match create_test_session_manager() {
             Some(m) => m,
@@ -335,7 +335,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis instance
+    #[ignore = "Requires Redis instance"]
     async fn test_session_update() {
         let manager = match create_test_session_manager() {
             Some(m) => m,
@@ -367,7 +367,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis instance
+    #[ignore = "Requires Redis instance"]
     async fn test_session_delete() {
         let manager = match create_test_session_manager() {
             Some(m) => m,
@@ -393,7 +393,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis instance
+    #[ignore = "Requires Redis instance"]
     async fn test_session_expiration() {
         let manager = match create_test_session_manager() {
             Some(m) => m,
@@ -421,7 +421,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis instance
+    #[ignore = "Requires Redis instance"]
     async fn test_session_conversation_history() {
         let manager = match create_test_session_manager() {
             Some(m) => m,
@@ -458,7 +458,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // Requires Redis instance
+    #[ignore = "Requires Redis instance"]
     async fn test_concurrent_session_updates() {
         let manager = match create_test_session_manager() {
             Some(m) => m,

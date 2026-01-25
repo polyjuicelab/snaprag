@@ -14,7 +14,17 @@ use crate::api::types::EngagementResponse;
 use crate::api::types::PopularCast;
 use crate::api::types::TopInteractiveUser;
 
+fn unix_to_farcaster_i64(unix_ts: i64) -> i64 {
+    let unix_u64 = u64::try_from(unix_ts).unwrap_or(0);
+    let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_u64);
+    i64::try_from(farcaster_ts).unwrap_or(i64::MAX)
+}
+
 /// Get engagement metrics for a user
+///
+/// # Errors
+/// Returns an error if database queries fail or timestamps are invalid.
+#[allow(clippy::too_many_lines)]
 pub async fn get_engagement(
     State(state): State<AppState>,
     Path(fid): Path<i64>,
@@ -27,16 +37,8 @@ pub async fn get_engagement(
     );
 
     // Convert Unix timestamps to Farcaster timestamps for database queries
-    let start_farcaster = params.start_timestamp.map(|unix_ts| {
-        #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
-        let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
-        farcaster_ts as i64
-    });
-    let end_farcaster = params.end_timestamp.map(|unix_ts| {
-        #[allow(clippy::cast_sign_loss)] // Timestamps are always positive
-        let farcaster_ts = crate::unix_to_farcaster_timestamp(unix_ts as u64);
-        farcaster_ts as i64
-    });
+    let start_farcaster = params.start_timestamp.map(unix_to_farcaster_i64);
+    let end_farcaster = params.end_timestamp.map(unix_to_farcaster_i64);
 
     // Get reactions received (likes)
     let reactions_received = match state

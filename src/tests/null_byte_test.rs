@@ -190,17 +190,17 @@ async fn test_null_byte_in_frame_action_text() {
     let hash = test_message_hash(7777);
 
     batched.frame_actions.push((
-        99,                                           // fid
-        "https://example.com".to_string(),            // url (String, not Option)
-        Some(1),                                      // button_index
-        Some(vec![0xAA; 32]),                         // cast_hash
-        Some(100),                                    // cast_fid
-        Some("Input\0Text\0".to_string()),            // input_text with null bytes
-        Some("State\0Data".to_string().into_bytes()), // state with null bytes (Vec<u8>)
-        Some(vec![0xBB; 32]),                         // transaction_id
-        1_698_765_432,                                // timestamp
-        hash,                                         // message_hash
-        shard_info,                                   // shard_block_info
+        99,                                // fid
+        "https://example.com".to_string(), // url (String, not Option)
+        Some(1),                           // button_index
+        Some(vec![0xAA; 32]),              // cast_hash
+        Some(100),                         // cast_fid
+        Some("Input\0Text\0".to_string()), // input_text with null bytes
+        Some(b"State\0Data".to_vec()),     // state with null bytes (Vec<u8>)
+        Some(vec![0xBB; 32]),              // transaction_id
+        1_698_765_432,                     // timestamp
+        hash,                              // message_hash
+        shard_info,                        // shard_block_info
     ));
 
     // This should succeed after the fix

@@ -5,6 +5,7 @@
 use snaprag::AppConfig;
 use snaprag::SnapRag;
 
+#[allow(clippy::significant_drop_tightening)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration

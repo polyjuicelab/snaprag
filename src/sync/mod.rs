@@ -4,6 +4,7 @@
 //! including block-by-block synchronization and real-time event streaming.
 
 pub mod client;
+pub mod hooks;
 pub mod lazy_loader;
 pub mod lock_file;
 pub mod process_monitor;
@@ -13,6 +14,7 @@ pub mod state_manager;
 pub mod types;
 
 pub use client::SnapchainClient;
+pub use hooks::HookManager;
 pub use lazy_loader::LazyLoader;
 pub use lock_file::SyncLockFile;
 pub use lock_file::SyncLockManager;

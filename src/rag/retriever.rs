@@ -158,8 +158,7 @@ impl Retriever {
         let has_exact_match = has_quotes || has_username;
 
         // Check query characteristics
-        let words: Vec<&str> = query.split_whitespace().collect();
-        let word_count = words.len();
+        let word_count = query.split_whitespace().count();
 
         // Decision logic
         if has_exact_match {

@@ -702,6 +702,30 @@ pub enum ServeCommands {
         #[arg(long)]
         job: Option<String>,
     },
+    /// Register HTTP hook for event processing during sync
+    Hook {
+        /// Event type to hook
+        #[arg(value_enum)]
+        event_type: crate::sync::hooks::EventType,
+        /// Webhook URL to call when event matches
+        #[arg(long, short = 'u')]
+        url: Option<String>,
+        /// Function hook to execute when event matches
+        #[arg(long, short = 'f')]
+        func_hook: Option<crate::sync::hooks::FuncHookType>,
+        /// Optional regex filter for text matching
+        #[arg(long)]
+        regex: Option<String>,
+        /// Optional FID filter
+        #[arg(long)]
+        fid: Option<i64>,
+        /// Optional target FID filter (for LinkAdd/Remove, ReactionAdd/Remove)
+        #[arg(long)]
+        target_fid: Option<i64>,
+        /// On-chain event type (only used when event_type is ON_CHAIN)
+        #[arg(long)]
+        onchain_event_type: Option<crate::sync::hooks::OnChainEventType>,
+    },
 }
 
 #[derive(ValueEnum, Clone)]

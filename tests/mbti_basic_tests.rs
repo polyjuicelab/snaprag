@@ -9,9 +9,9 @@ use snaprag::config::MbtiMethod;
 #[test]
 fn test_mbti_method_enum() {
     // Test that all MBTI methods are defined
-    let _rule_based = MbtiMethod::RuleBased;
-    let _ml = MbtiMethod::MachineLearning;
-    let _ensemble = MbtiMethod::Ensemble;
+    let _ = MbtiMethod::RuleBased;
+    let _ = MbtiMethod::MachineLearning;
+    let _ = MbtiMethod::Ensemble;
 
     println!("✅ All MBTI methods are properly defined");
 }
@@ -21,7 +21,7 @@ fn test_mbti_config_default() {
     let config = MbtiConfig::default();
 
     assert_eq!(config.method, MbtiMethod::RuleBased);
-    assert_eq!(config.use_llm, false);
+    assert!(!config.use_llm);
 
     println!("✅ MbtiConfig defaults to rule-based method");
 }
@@ -38,12 +38,12 @@ fn test_mbti_config_serialization() {
 
     // Test serialization
     let toml_str = toml::to_string(&config).expect("Failed to serialize");
-    println!("Serialized config:\n{}", toml_str);
+    println!("Serialized config:\n{toml_str}");
 
     // Test deserialization
     let deserialized: MbtiConfig = toml::from_str(&toml_str).expect("Failed to deserialize");
     assert_eq!(deserialized.method, MbtiMethod::MachineLearning);
-    assert_eq!(deserialized.use_llm, true);
+    assert!(deserialized.use_llm);
 
     println!("✅ MbtiConfig serialization/deserialization works");
 }
@@ -68,7 +68,7 @@ fn test_mbti_method_in_config_serialization() {
 
     for config in configs {
         let toml_str = toml::to_string(&config).expect("Failed to serialize config");
-        println!("Method {:?} serializes to:\n{}", config.method, toml_str);
+        println!("Method {:?} serializes to:\n{toml_str}", config.method);
 
         // Verify it can be deserialized back
         let _: MbtiConfig = toml::from_str(&toml_str).expect("Failed to deserialize");
@@ -87,7 +87,7 @@ fn test_load_test_config() {
             println!("   Use LLM: {}", config.mbti.use_llm);
         }
         Err(e) => {
-            println!("⚠️  Test config not available: {}", e);
+            println!("⚠️  Test config not available: {e}");
             println!("   This is expected if config.test.toml doesn't exist");
         }
     }

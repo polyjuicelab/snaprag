@@ -266,7 +266,7 @@ impl LazyLoader {
                 if let Some(user_data_body) = user_data_body {
                     // Handle both string type (from HTTP API) and numeric type (from gRPC)
                     let type_value = user_data_body.get("type");
-                    let data_type = type_value.map(parse_user_data_type).unwrap_or(0);
+                    let data_type = type_value.map_or(0, parse_user_data_type);
 
                     let value = user_data_body
                         .get("value")
@@ -390,7 +390,7 @@ impl LazyLoader {
                 if let Some(user_data_body) = user_data_body {
                     // Handle both string type (from HTTP API) and numeric type (from gRPC)
                     let type_value = user_data_body.get("type");
-                    let data_type = type_value.map(parse_user_data_type).unwrap_or(0);
+                    let data_type = type_value.map_or(0, parse_user_data_type);
 
                     let value = user_data_body
                         .get("value")
@@ -534,9 +534,7 @@ impl LazyLoader {
 
     /// Parse cast message from Snapchain response
     fn parse_cast_message(&self, message: &crate::sync::client::FarcasterMessage) -> Option<Cast> {
-        let Some(ref data) = message.data else {
-            return None;
-        };
+        let data = message.data.as_ref()?;
 
         let fid = data.fid as i64;
         let timestamp = data.timestamp as i64;
