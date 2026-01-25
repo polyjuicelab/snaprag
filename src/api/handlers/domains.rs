@@ -25,34 +25,40 @@ pub async fn get_domains(
 
     // Get all username proofs for the user - use API (no pagination, typically only a few proofs per user)
     let proofs = if let Some(lazy_loader) = &state.lazy_loader {
+        let fid_u64 = u64::try_from(fid).map_err(|_| StatusCode::BAD_REQUEST)?;
         let client = lazy_loader.client();
-        match client.get_username_proofs_by_fid(fid as u64).await {
+        match client.get_username_proofs_by_fid(fid_u64).await {
             Ok(api_proofs) => {
                 // Convert API proofs to database format
-                api_proofs
+                let converted: Result<Vec<_>, StatusCode> = api_proofs
                     .into_iter()
                     .map(|proof| {
-                        crate::models::UsernameProof {
+                        let proof_fid = i64::try_from(proof.fid)
+                            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        let timestamp = i64::try_from(proof.timestamp)
+                            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        Ok(crate::models::UsernameProof {
                             id: uuid::Uuid::new_v4(),
-                            fid: proof.fid as i64,
+                            fid: proof_fid,
                             username: String::from_utf8_lossy(&proof.name).to_string(),
                             owner: proof.owner,
                             signature: proof.signature,
-                            timestamp: proof.timestamp as i64,
+                            timestamp,
                             username_type: match proof.r#type {
-                                1 => 1, // Fname
-                                2 => 2, // EnsL1
-                                3 => 3, // Basename
-                                _ => 0, // None
-                            } as i16,
+                                1 => 1_i16, // Fname
+                                2 => 2_i16, // EnsL1
+                                3 => 3_i16, // Basename
+                                _ => 0_i16, // None
+                            },
                             message_hash: vec![0u8; 32], // API doesn't provide message_hash
                             created_at: chrono::Utc::now(),
                             shard_id: None,
                             block_height: None,
                             transaction_fid: None,
-                        }
+                        })
                     })
-                    .collect()
+                    .collect();
+                converted?
             }
             Err(e) => {
                 warn!("Failed to get username proofs from API for FID {}: {}, falling back to database", fid, e);

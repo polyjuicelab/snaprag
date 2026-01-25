@@ -8,6 +8,9 @@ use crate::Result;
 use crate::SnapRag;
 
 mod chat;
+mod hook;
+
+pub use hook::handle_serve_hook;
 
 pub async fn handle_serve_api(
     config: &AppConfig,

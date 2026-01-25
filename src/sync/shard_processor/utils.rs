@@ -12,7 +12,7 @@ pub fn sanitize_string(s: &Option<String>) -> Option<String> {
 }
 
 /// Sanitize a String by removing null bytes
-pub fn sanitize_string_owned(s: String) -> String {
+pub fn sanitize_string_owned(s: &str) -> String {
     s.replace('\0', "")
 }
 

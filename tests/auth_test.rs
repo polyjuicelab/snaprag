@@ -34,7 +34,7 @@ fn test_extract_auth_headers() {
 
     let (token, timestamp, signature) = extract_auth_headers(&headers).unwrap();
     assert_eq!(token, "test_token");
-    assert_eq!(timestamp, 1234567890);
+    assert_eq!(timestamp, 1_234_567_890);
     assert_eq!(signature, "test_signature");
 }
 
@@ -53,7 +53,7 @@ fn test_build_signature_string() {
     let uri = Uri::from_static("/api/profiles/123?limit=10");
     let method = &Method::GET;
     let body_hash = "";
-    let timestamp = 1234567890;
+    let timestamp = 1_234_567_890;
 
     let sig_string = build_signature_string(method, &uri, body_hash, timestamp);
     // Path should have /api prefix stripped
@@ -66,7 +66,7 @@ fn test_build_signature_string_with_body() {
     let uri = Uri::from_static("/api/search/profiles");
     let method = &Method::POST;
     let body_hash = "abc123def456";
-    let timestamp = 1234567890;
+    let timestamp = 1_234_567_890;
 
     let sig_string = build_signature_string(method, &uri, body_hash, timestamp);
     // Path should have /api prefix stripped
@@ -162,10 +162,13 @@ fn test_auth_state_verify_timestamp() {
     let auth_state = AuthState::new(&auth_config);
 
     // Current timestamp should be valid
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
+    let now = i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    )
+    .unwrap_or(i64::MAX);
     assert!(auth_state.verify_timestamp(now).is_ok());
 
     // Timestamp within window should be valid
@@ -240,12 +243,12 @@ fn test_signature_string_format() {
     for (method_str, path, query, body_hash, expected) in test_cases {
         let method = Method::from_bytes(method_str.as_bytes()).unwrap();
         let uri = if query.is_empty() {
-            Uri::from_str(&format!("http://example.com{}", path)).unwrap()
+            Uri::from_str(&format!("http://example.com{path}")).unwrap()
         } else {
-            Uri::from_str(&format!("http://example.com{}?{}", path, query)).unwrap()
+            Uri::from_str(&format!("http://example.com{path}?{query}")).unwrap()
         };
 
-        let sig_string = build_signature_string(&method, &uri, body_hash, 1234567890);
+        let sig_string = build_signature_string(&method, &uri, body_hash, 1_234_567_890);
         assert_eq!(sig_string, expected);
     }
 }
@@ -302,10 +305,7 @@ fn test_signature_string_matches_client() {
         body_hash: &str,
         timestamp: i64,
     ) -> String {
-        format!(
-            "{}\n{}\n{}\n{}\n{}",
-            method, path, query, body_hash, timestamp
-        )
+        format!("{method}\n{path}\n{query}\n{body_hash}\n{timestamp}")
     }
 
     fn client_sign_request(
@@ -320,19 +320,19 @@ fn test_signature_string_matches_client() {
         let sig_string = client_build_signature_string(method, path, query, &body_hash, timestamp);
 
         let secret_bytes =
-            hex::decode(secret_hex).map_err(|e| format!("Invalid secret format: {}", e))?;
+            hex::decode(secret_hex).map_err(|e| format!("Invalid secret format: {e}"))?;
 
         let mut mac = Hmac::<Sha256>::new_from_slice(&secret_bytes)
-            .map_err(|e| format!("Failed to create HMAC: {}", e))?;
+            .map_err(|e| format!("Failed to create HMAC: {e}"))?;
         mac.update(sig_string.as_bytes());
         let signature = mac.finalize().into_bytes();
 
-        Ok(general_purpose::STANDARD.encode(&signature))
+        Ok(general_purpose::STANDARD.encode(signature))
     }
 
     // Test case: GET /api/profiles/1
     let secret_hex = "b19aa6643145b297626ee72aa1cb96f731a0dd108f46afe0dde22052866046c4";
-    let timestamp = 1765812565;
+    let timestamp = 1_765_812_565;
 
     // Client side: URL is http://127.0.0.1:3000/api/profiles/1
     // Client extracts pathname: /api/profiles/1
@@ -359,32 +359,29 @@ fn test_signature_string_matches_client() {
 
     // Server builds signature string (should strip /api prefix)
     let server_sig_string =
-        build_signature_string(&server_method, &server_uri, &server_body_hash, timestamp);
+        build_signature_string(&server_method, &server_uri, server_body_hash, timestamp);
 
     // Verify server signature string matches client
     let expected_client_sig_string =
         client_build_signature_string("GET", "/profiles/1", "", "", timestamp);
 
     assert_eq!(
-        server_sig_string, expected_client_sig_string,
-        "Server signature string should match client. Server: {:?}, Client: {:?}",
-        server_sig_string, expected_client_sig_string
+        server_sig_string,
+        expected_client_sig_string,
+        "Server signature string should match client. Server: {server_sig_string:?}, Client: {expected_client_sig_string:?}"
     );
 
     // Verify server can verify client's signature
     // Server stores secret as hex string, so we need to use it directly
+    let client_signature_preview = client_signature.chars().take(30).collect::<String>();
     assert!(
         verify_signature(secret_hex, &server_sig_string, &client_signature).is_ok(),
-        "Server should be able to verify client signature. Server sig: {:?}, Client sig: {}",
-        server_sig_string,
-        &client_signature.chars().take(30).collect::<String>()
+        "Server should be able to verify client signature. Server sig: {server_sig_string:?}, Client sig: {client_signature_preview}"
     );
 
     println!("✅ Signature strings match!");
-    println!("   Client sig string: {:?}", expected_client_sig_string);
-    println!("   Server sig string: {:?}", server_sig_string);
-    println!(
-        "   Client signature: {}",
-        &client_signature.chars().take(30).collect::<String>()
-    );
+    let client_signature_short = client_signature.chars().take(30).collect::<String>();
+    println!("   Client sig string: {expected_client_sig_string:?}");
+    println!("   Server sig string: {server_sig_string:?}");
+    println!("   Client signature: {client_signature_short}");
 }

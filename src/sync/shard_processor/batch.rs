@@ -685,7 +685,7 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
             {
                 q = q
                     .bind(fid)
-                    .bind(sanitize_string_owned(username.clone())) // Remove null bytes from username
+                    .bind(sanitize_string_owned(&username)) // Remove null bytes from username
                     .bind(username_type)
                     .bind(owner) // owner is BYTEA, no conversion needed
                     .bind(signature)
@@ -763,7 +763,7 @@ pub async fn flush_batched_data(database: &Database, batched: BatchedData) -> Re
             {
                 q = q
                     .bind(fid)
-                    .bind(sanitize_string_owned(url.clone())) // Remove null bytes from URL
+                    .bind(sanitize_string_owned(&url)) // Remove null bytes from URL
                     .bind(button_index)
                     .bind(cast_hash)
                     .bind(cast_fid)

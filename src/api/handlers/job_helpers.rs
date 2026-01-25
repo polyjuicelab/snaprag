@@ -64,14 +64,12 @@ pub async fn check_or_create_job(state: &AppState, config: &JobConfig) -> JobRes
             // Create new job
             let job_data = if config.job_type == "annual_report" {
                 // Annual report jobs require year field - it must be provided
-                match config.year {
-                    Some(year) => {
-                        serde_json::json!({"fid": config.fid, "year": year, "type": config.job_type}).to_string()
-                    }
-                    None => {
-                        error!("Missing year for annual_report job - year is required");
-                        return JobResult::Failed;
-                    }
+                if let Some(year) = config.year {
+                    serde_json::json!({"fid": config.fid, "year": year, "type": config.job_type})
+                        .to_string()
+                } else {
+                    error!("Missing year for annual_report job - year is required");
+                    return JobResult::Failed;
                 }
             } else {
                 serde_json::json!({"fid": config.fid, "type": config.job_type}).to_string()
@@ -98,14 +96,12 @@ pub async fn trigger_background_update(state: &AppState, config: &JobConfig) {
         if let Ok(redis_client) = RedisClient::connect(redis_cfg) {
             let job_data = if config.job_type == "annual_report" {
                 // Annual report jobs require year field - it must be provided
-                match config.year {
-                    Some(year) => {
-                        serde_json::json!({"fid": config.fid, "year": year, "type": config.job_type}).to_string()
-                    }
-                    None => {
-                        error!("Missing year for annual_report job - year is required");
-                        return;
-                    }
+                if let Some(year) = config.year {
+                    serde_json::json!({"fid": config.fid, "year": year, "type": config.job_type})
+                        .to_string()
+                } else {
+                    error!("Missing year for annual_report job - year is required");
+                    return;
                 }
             } else {
                 serde_json::json!({"fid": config.fid, "type": config.job_type}).to_string()

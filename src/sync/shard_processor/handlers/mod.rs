@@ -8,11 +8,16 @@
 /// - username.rs: `UsernameProof` handler
 /// - frame.rs: `FrameAction` handler
 /// - system.rs: System message (`OnChainEvent`) handler
+use std::sync::Arc;
+
 use super::cast_handlers::collect_cast_add;
 use super::types::BatchedData;
 use crate::models::ShardBlockInfo;
 use crate::sync::client::proto::Message as FarcasterMessage;
 use crate::sync::client::proto::Transaction;
+use crate::sync::hooks::EventData;
+use crate::sync::hooks::EventType;
+use crate::sync::hooks::HookManager;
 use crate::Result;
 
 mod frame;
@@ -33,6 +38,7 @@ pub(super) async fn collect_transaction_data(
     timestamp: u64,
     tx_index: usize,
     batched: &mut BatchedData,
+    hook_manager: Option<&Arc<HookManager>>,
 ) -> Result<()> {
     let fid = transaction.fid;
 
@@ -43,14 +49,15 @@ pub(super) async fn collect_transaction_data(
     // Process user messages (only in user transactions, fid > 0)
     if fid > 0 {
         for (msg_idx, message) in transaction.user_messages.iter().enumerate() {
-            collect_message_data(message, &shard_block_info, msg_idx, batched).await?;
+            collect_message_data(message, &shard_block_info, msg_idx, batched, hook_manager)
+                .await?;
         }
     }
 
     // Process system messages (can appear in both user and system transactions)
     // System transactions (fid=0) contain batch OP chain events like id_register
     for system_msg in &transaction.system_messages {
-        process_system_message(system_msg, &shard_block_info, batched).await?;
+        process_system_message(system_msg, &shard_block_info, batched, hook_manager).await?;
     }
 
     Ok(())
@@ -62,6 +69,7 @@ pub(super) async fn collect_message_data(
     shard_block_info: &ShardBlockInfo,
     msg_index: usize,
     batched: &mut BatchedData,
+    hook_manager: Option<&Arc<HookManager>>,
 ) -> Result<()> {
     let data = message
         .data
@@ -80,6 +88,31 @@ pub(super) async fn collect_message_data(
         1 => {
             // CastAdd - delegate to cast_handlers
             collect_cast_add(data, &message_hash, shard_block_info, batched).await?;
+
+            // Trigger hook for MERGE_MESSAGE (CastAdd)
+            if let Some(hm) = hook_manager {
+                let text = data
+                    .body
+                    .as_ref()
+                    .and_then(|b| b.get("cast_add_body"))
+                    .and_then(|c| c.get("text"))
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string());
+
+                let event_data = EventData {
+                    event_type: EventType::MergeMessage,
+                    fid,
+                    target_fid: None,
+                    timestamp,
+                    data: serde_json::json!({
+                        "message_type": message_type,
+                        "message_hash": hex::encode(&message_hash),
+                        "text": text
+                    }),
+                    text,
+                };
+                hm.check_and_trigger(&event_data).await;
+            }
         }
         2 => {
             // CastRemove - no action needed (soft delete handled in casts table)
@@ -95,6 +128,29 @@ pub(super) async fn collect_message_data(
                     shard_block_info,
                     batched,
                 );
+
+                // Trigger hook for MERGE_MESSAGE (ReactionAdd)
+                if let Some(hm) = hook_manager {
+                    let target_fid = body
+                        .get("reaction_body")
+                        .and_then(|rb| rb.get("target_cast_id"))
+                        .and_then(|tc| tc.get("fid"))
+                        .and_then(|f| f.as_i64());
+
+                    let event_data = EventData {
+                        event_type: EventType::MergeMessage,
+                        fid,
+                        target_fid,
+                        timestamp,
+                        data: serde_json::json!({
+                            "message_type": message_type,
+                            "message_hash": hex::encode(&message_hash),
+                            "reaction_body": body.get("reaction_body")
+                        }),
+                        text: None,
+                    };
+                    hm.check_and_trigger(&event_data).await;
+                }
             }
         }
         4 => {
@@ -108,6 +164,29 @@ pub(super) async fn collect_message_data(
                     shard_block_info,
                     batched,
                 );
+
+                // Trigger hook for MERGE_MESSAGE (ReactionRemove)
+                if let Some(hm) = hook_manager {
+                    let target_fid = body
+                        .get("reaction_body")
+                        .and_then(|rb| rb.get("target_cast_id"))
+                        .and_then(|tc| tc.get("fid"))
+                        .and_then(|f| f.as_i64());
+
+                    let event_data = EventData {
+                        event_type: EventType::MergeMessage,
+                        fid,
+                        target_fid,
+                        timestamp,
+                        data: serde_json::json!({
+                            "message_type": message_type,
+                            "message_hash": hex::encode(&message_hash),
+                            "reaction_body": body.get("reaction_body")
+                        }),
+                        text: None,
+                    };
+                    hm.check_and_trigger(&event_data).await;
+                }
             }
         }
         5 => {
@@ -121,6 +200,28 @@ pub(super) async fn collect_message_data(
                     shard_block_info,
                     batched,
                 );
+
+                // Trigger hook for MERGE_MESSAGE (LinkAdd)
+                if let Some(hm) = hook_manager {
+                    let target_fid = body
+                        .get("link_body")
+                        .and_then(|lb| lb.get("target_fid"))
+                        .and_then(|f| f.as_i64());
+
+                    let event_data = EventData {
+                        event_type: EventType::MergeMessage,
+                        fid,
+                        target_fid,
+                        timestamp,
+                        data: serde_json::json!({
+                            "message_type": message_type,
+                            "message_hash": hex::encode(&message_hash),
+                            "link_body": body.get("link_body")
+                        }),
+                        text: None,
+                    };
+                    hm.check_and_trigger(&event_data).await;
+                }
             }
         }
         6 => {
@@ -134,6 +235,28 @@ pub(super) async fn collect_message_data(
                     shard_block_info,
                     batched,
                 );
+
+                // Trigger hook for MERGE_MESSAGE (LinkRemove)
+                if let Some(hm) = hook_manager {
+                    let target_fid = body
+                        .get("link_body")
+                        .and_then(|lb| lb.get("target_fid"))
+                        .and_then(|f| f.as_i64());
+
+                    let event_data = EventData {
+                        event_type: EventType::MergeMessage,
+                        fid,
+                        target_fid,
+                        timestamp,
+                        data: serde_json::json!({
+                            "message_type": message_type,
+                            "message_hash": hex::encode(&message_hash),
+                            "link_body": body.get("link_body")
+                        }),
+                        text: None,
+                    };
+                    hm.check_and_trigger(&event_data).await;
+                }
             }
         }
         7 => {
@@ -179,6 +302,29 @@ pub(super) async fn collect_message_data(
                     shard_block_info,
                     batched,
                 );
+
+                // Trigger hook for MERGE_USERNAME_PROOF
+                if let Some(hm) = hook_manager {
+                    let username = body
+                        .get("username_proof_body")
+                        .and_then(|upb| upb.get("username"))
+                        .and_then(|u| u.as_str())
+                        .map(|s| s.to_string());
+
+                    let event_data = EventData {
+                        event_type: EventType::MergeUsernameProof,
+                        fid,
+                        target_fid: None,
+                        timestamp,
+                        data: serde_json::json!({
+                            "message_type": message_type,
+                            "message_hash": hex::encode(&message_hash),
+                            "username_proof_body": body.get("username_proof_body")
+                        }),
+                        text: username,
+                    };
+                    hm.check_and_trigger(&event_data).await;
+                }
             }
         }
         13 => {

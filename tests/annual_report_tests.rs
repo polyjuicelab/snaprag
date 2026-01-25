@@ -2,33 +2,66 @@
 //!
 //! These tests verify that the annual report endpoints work correctly
 //! and return the expected data structures.
+#![allow(clippy::significant_drop_tightening)]
 
+use snaprag::api::cache::CacheConfig;
+use snaprag::api::cache::CacheService;
 use snaprag::api::handlers::AppState;
+use snaprag::api::redis_client::RedisClient;
+use snaprag::api::session::SessionManager;
 use snaprag::api::types::ApiResponse;
+use snaprag::embeddings::EmbeddingService;
+use snaprag::llm::LlmService;
+use snaprag::sync::LazyLoader;
 use snaprag::AppConfig;
 use snaprag::Database;
-use snaprag::SnapRag;
 
-/// Test helper to create a test AppState
+/// Test helper to create a test `AppState`
 async fn create_test_app_state() -> AppState {
     let config = AppConfig::load().expect("Failed to load config");
-    let snaprag = SnapRag::new(&config)
-        .await
-        .expect("Failed to create SnapRag instance");
+    let database = std::sync::Arc::new(
+        Database::from_config(&config)
+            .await
+            .expect("Failed to create database"),
+    );
+    let embedding_service =
+        std::sync::Arc::new(EmbeddingService::new(&config).expect("Embedding init failed"));
+    let llm_service = LlmService::new(&config).ok().map(std::sync::Arc::new);
+    let lazy_loader: Option<std::sync::Arc<LazyLoader>> = None;
+
+    let redis_cfg = config
+        .redis
+        .as_ref()
+        .expect("Redis configuration required for tests");
+    let redis_client =
+        std::sync::Arc::new(RedisClient::connect(redis_cfg).expect("Redis connect failed"));
+    let session_manager = std::sync::Arc::new(SessionManager::new(3600, redis_client.clone()));
+    let cache_service = std::sync::Arc::new(CacheService::with_config(
+        redis_client,
+        CacheConfig {
+            profile_ttl: std::time::Duration::from_secs(config.cache.profile_ttl_secs),
+            social_ttl: std::time::Duration::from_secs(config.cache.social_ttl_secs),
+            mbti_ttl: std::time::Duration::from_secs(7200),
+            cast_stats_ttl: std::time::Duration::from_secs(config.cache.cast_stats_ttl_secs),
+            annual_report_ttl: std::time::Duration::from_secs(0),
+            stale_threshold: std::time::Duration::from_secs(redis_cfg.stale_threshold_secs),
+            enable_stats: config.cache.enable_stats,
+        },
+    ));
 
     AppState {
         config: std::sync::Arc::new(config),
-        database: snaprag.database.clone(),
-        embedding_service: snaprag.embedding_service.clone(),
-        llm_service: None,
-        lazy_loader: None,
-        session_manager: snaprag.session_manager.clone(),
-        cache_service: snaprag.cache_service.clone(),
+        database,
+        embedding_service,
+        llm_service,
+        lazy_loader,
+        session_manager,
+        cache_service,
     }
 }
 
 #[tokio::test]
-#[ignore] // Requires database connection
+#[ignore = "Requires database connection"]
 async fn test_engagement_endpoint_structure() {
     let state = create_test_app_state().await;
 
@@ -65,7 +98,7 @@ async fn test_engagement_endpoint_structure() {
 }
 
 #[tokio::test]
-#[ignore] // Requires database connection
+#[ignore = "Requires database connection"]
 async fn test_temporal_activity_endpoint_structure() {
     let state = create_test_app_state().await;
     let fid = 1;
