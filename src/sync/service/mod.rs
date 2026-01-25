@@ -3,11 +3,13 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use crate::config::AppConfig;
 use crate::database::Database;
 use crate::sync::client::SnapchainClient;
 use crate::sync::hooks::HookManager;
+use crate::sync::hooks::HookQueue;
 use crate::sync::lock_file::SyncLockFile;
 use crate::sync::lock_file::SyncLockManager;
 use crate::sync::shard_processor::ShardProcessor;
@@ -44,7 +46,19 @@ pub struct SyncService {
 impl SyncService {
     /// Create a new sync service
     pub async fn new(app_config: &AppConfig, database: Arc<Database>) -> Result<Self> {
-        Self::new_with_hooks(app_config, database, None).await
+        let hook_manager = if let Some(redis_cfg) = &app_config.redis {
+            match crate::api::redis_client::RedisClient::connect(redis_cfg) {
+                Ok(redis) => Some(Arc::new(HookManager::new_with_queue(HookQueue::new(redis)))),
+                Err(e) => {
+                    warn!("Failed to initialize hook queue (redis): {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        Self::new_with_hooks(app_config, database, hook_manager).await
     }
 
     /// Create a new sync service with optional hook manager

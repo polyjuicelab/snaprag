@@ -4,7 +4,9 @@
 //! when specific events match configured filters during the sync process.
 
 mod config;
+mod func_hook;
 mod matcher;
+mod queue;
 mod webhook_client;
 
 #[cfg(test)]
@@ -15,7 +17,13 @@ use std::sync::Arc;
 pub use config::EventType;
 pub use config::HookConfig;
 pub use config::OnChainEventType;
+pub use func_hook::build_func_hook;
+pub use func_hook::FuncHookType;
 pub use matcher::EventMatcher;
+pub use queue::HookEvent;
+pub use queue::HookQueue;
+pub use queue::HOOK_EVENT_QUEUE_KEY;
+pub use queue::HOOK_EVENT_QUEUE_MAX_LEN;
 use tokio::sync::RwLock;
 pub use webhook_client::WebhookClient;
 
@@ -24,6 +32,7 @@ pub use webhook_client::WebhookClient;
 pub struct HookManager {
     hooks: Arc<RwLock<Vec<HookConfig>>>,
     webhook_client: WebhookClient,
+    queue: Option<HookQueue>,
 }
 
 impl HookManager {
@@ -32,6 +41,16 @@ impl HookManager {
         Self {
             hooks: Arc::new(RwLock::new(Vec::new())),
             webhook_client: WebhookClient::new(),
+            queue: None,
+        }
+    }
+
+    /// Create a new HookManager that enqueues events to Redis
+    pub fn new_with_queue(queue: HookQueue) -> Self {
+        Self {
+            hooks: Arc::new(RwLock::new(Vec::new())),
+            webhook_client: WebhookClient::new(),
+            queue: Some(queue),
         }
     }
 
@@ -52,7 +71,7 @@ impl HookManager {
                 }
             }
             if let Some(u) = url {
-                if hook.webhook_url != u {
+                if hook.webhook_url.as_deref() != Some(u) {
                     return true;
                 }
             }
@@ -68,28 +87,42 @@ impl HookManager {
 
     /// Check if any hooks match the given event and trigger webhooks
     pub async fn check_and_trigger(&self, event: &EventData) {
+        if let Some(queue) = &self.queue {
+            if let Err(e) = queue.enqueue(event).await {
+                tracing::error!("Failed to enqueue hook event: {}", e);
+            }
+            return;
+        }
+
         let hooks = self.hooks.read().await;
         let matcher = EventMatcher::new();
 
         for hook in hooks.iter() {
             if matcher.matches(hook, event) {
                 tracing::debug!("Hook matched for event: {:?}", event);
-                let payload = serde_json::json!({
-                    "event_type": format!("{:?}", event.event_type),
-                    "fid": event.fid,
-                    "target_fid": event.target_fid,
-                    "timestamp": event.timestamp,
-                    "data": event.data
-                });
+                if let Some(func_hook) = hook.func_hook {
+                    let hook_impl = build_func_hook(func_hook);
+                    hook_impl.handle(event);
+                }
 
-                // Trigger webhook asynchronously without blocking
-                let client = self.webhook_client.clone();
-                let url = hook.webhook_url.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = client.send_webhook(&url, &payload).await {
-                        tracing::error!("Failed to send webhook to {}: {}", url, e);
-                    }
-                });
+                if let Some(url) = &hook.webhook_url {
+                    let payload = serde_json::json!({
+                        "event_type": format!("{:?}", event.event_type),
+                        "fid": event.fid,
+                        "target_fid": event.target_fid,
+                        "timestamp": event.timestamp,
+                        "data": event.data
+                    });
+
+                    // Trigger webhook asynchronously without blocking
+                    let client = self.webhook_client.clone();
+                    let url = url.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = client.send_webhook(&url, &payload).await {
+                            tracing::error!("Failed to send webhook to {}: {}", url, e);
+                        }
+                    });
+                }
             }
         }
     }

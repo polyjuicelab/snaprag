@@ -709,7 +709,10 @@ pub enum ServeCommands {
         event_type: crate::sync::hooks::EventType,
         /// Webhook URL to call when event matches
         #[arg(long, short = 'u')]
-        url: String,
+        url: Option<String>,
+        /// Function hook to execute when event matches
+        #[arg(long, short = 'f')]
+        func_hook: Option<crate::sync::hooks::FuncHookType>,
         /// Optional regex filter for text matching
         #[arg(long)]
         regex: Option<String>,

@@ -11,9 +11,10 @@ fn test_matcher_fid_filter() {
     let matcher = EventMatcher::new();
     let hook = HookConfig::new(
         EventType::MergeMessage,
-        "http://example.com/webhook".to_string(),
+        Some("http://example.com/webhook".to_string()),
         None,
         Some(123),
+        None,
         None,
         None,
     );
@@ -46,10 +47,11 @@ fn test_matcher_target_fid_filter() {
     let matcher = EventMatcher::new();
     let hook = HookConfig::new(
         EventType::MergeMessage,
-        "http://example.com/webhook".to_string(),
+        Some("http://example.com/webhook".to_string()),
         None,
         None,
         Some(789),
+        None,
         None,
     );
 
@@ -92,8 +94,9 @@ fn test_matcher_regex_filter() {
     let matcher = EventMatcher::new();
     let hook = HookConfig::new(
         EventType::MergeMessage,
-        "http://example.com/webhook".to_string(),
+        Some("http://example.com/webhook".to_string()),
         Some("hello".to_string()),
+        None,
         None,
         None,
         None,
@@ -138,7 +141,8 @@ fn test_matcher_event_type_mismatch() {
     let matcher = EventMatcher::new();
     let hook = HookConfig::new(
         EventType::MergeMessage,
-        "http://example.com/webhook".to_string(),
+        Some("http://example.com/webhook".to_string()),
+        None,
         None,
         None,
         None,
@@ -162,11 +166,12 @@ fn test_matcher_onchain_event_type() {
     let matcher = EventMatcher::new();
     let hook = HookConfig::new(
         EventType::OnChain,
-        "http://example.com/webhook".to_string(),
+        Some("http://example.com/webhook".to_string()),
         None,
         None,
         None,
         Some(OnChainEventType::IdRegister),
+        None,
     );
 
     // Match: onchain event type matches
@@ -201,10 +206,11 @@ fn test_matcher_combined_filters() {
     let matcher = EventMatcher::new();
     let hook = HookConfig::new(
         EventType::MergeMessage,
-        "http://example.com/webhook".to_string(),
+        Some("http://example.com/webhook".to_string()),
         Some("hello".to_string()),
         Some(123),
         Some(789),
+        None,
         None,
     );
 

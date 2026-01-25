@@ -49,7 +49,7 @@ async fn cleanup_test_data(redis: &RedisClient, prefix: &str) {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_chat_job_creation() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -111,7 +111,7 @@ async fn test_chat_job_creation() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance and full setup
+#[ignore = "Requires Redis instance and full setup"]
 async fn test_chat_session_persistence() {
     let session_manager = match create_test_session_manager() {
         Some(m) => m,
@@ -157,7 +157,7 @@ async fn test_chat_session_persistence() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_chat_result_retrieval() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -198,7 +198,7 @@ async fn test_chat_result_retrieval() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_chat_concurrent_requests() {
     let redis = match create_test_redis_client() {
         Some(r) => r,

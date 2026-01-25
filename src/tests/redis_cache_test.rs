@@ -51,7 +51,7 @@ async fn cleanup_test_data(redis: &RedisClient, prefix: &str) {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_cache_set_and_get_fresh() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -105,7 +105,7 @@ async fn test_cache_set_and_get_fresh() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_cache_miss() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -128,7 +128,7 @@ async fn test_cache_miss() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_queue_push_and_pop() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -176,7 +176,7 @@ async fn test_queue_push_and_pop() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_job_status_management() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -220,7 +220,7 @@ async fn test_job_status_management() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_job_deduplication() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -255,7 +255,7 @@ async fn test_job_deduplication() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_queue_job_ttl() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -305,7 +305,7 @@ async fn test_queue_job_ttl() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_queue_job_data_expiration() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -343,7 +343,7 @@ async fn test_queue_job_data_expiration() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_social_cache_stale_while_revalidate() {
     let redis = match create_test_redis_client() {
         Some(r) => r,
@@ -439,7 +439,7 @@ async fn test_social_cache_stale_while_revalidate() {
 }
 
 #[tokio::test]
-#[ignore] // Requires Redis instance
+#[ignore = "Requires Redis instance"]
 async fn test_cache_statistics() {
     let redis = match create_test_redis_client() {
         Some(r) => r,

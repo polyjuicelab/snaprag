@@ -2,34 +2,45 @@
 
 use std::sync::Arc;
 
+use crate::api::redis_client::RedisClient;
 use crate::cli::output::*;
 use crate::sync::hooks::EventType;
+use crate::sync::hooks::FuncHookType;
 use crate::sync::hooks::HookConfig;
 use crate::sync::hooks::HookManager;
+use crate::sync::hooks::HookQueue;
 use crate::sync::hooks::OnChainEventType;
 use crate::AppConfig;
 use crate::Result;
-use crate::SnapRag;
 
 /// Handle hook registration command
 pub async fn handle_serve_hook(
     config: &AppConfig,
     event_type: EventType,
-    url: String,
+    url: Option<String>,
     regex: Option<String>,
     fid: Option<i64>,
     target_fid: Option<i64>,
     onchain_event_type: Option<OnChainEventType>,
+    func_hook: Option<FuncHookType>,
 ) -> Result<()> {
-    print_info("Registering HTTP Hook");
+    print_info("Registering Hook");
     println!("===============================\n");
 
+    if url.is_none() && func_hook.is_none() {
+        return Err(crate::SnapRagError::Custom(
+            "Either --url or --func-hook must be provided".to_string(),
+        ));
+    }
+
     // Validate URL
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(crate::SnapRagError::Custom(format!(
-            "Invalid webhook URL: {}. Must start with http:// or https://",
-            url
-        )));
+    if let Some(ref webhook_url) = url {
+        if !webhook_url.starts_with("http://") && !webhook_url.starts_with("https://") {
+            return Err(crate::SnapRagError::Custom(format!(
+                "Invalid webhook URL: {}. Must start with http:// or https://",
+                webhook_url
+            )));
+        }
     }
 
     // Create hook configuration
@@ -40,13 +51,19 @@ pub async fn handle_serve_hook(
         fid,
         target_fid,
         onchain_event_type,
+        func_hook,
     );
 
     println!("📌 Event Type: {:?}", hook_config.event_type);
     if let Some(oct) = hook_config.onchain_event_type {
         println!("📌 OnChain Event Type: {:?}", oct);
     }
-    println!("🔗 Webhook URL: {}", hook_config.webhook_url);
+    if let Some(ref webhook_url) = hook_config.webhook_url {
+        println!("🔗 Webhook URL: {}", webhook_url);
+    }
+    if let Some(func_hook) = hook_config.func_hook {
+        println!("🧩 Function Hook: {:?}", func_hook);
+    }
     if let Some(ref r) = hook_config.regex_filter {
         println!("🔍 Regex Filter: {}", r);
     }
@@ -58,43 +75,49 @@ pub async fn handle_serve_hook(
     }
     println!();
 
-    // Create SnapRag instance and get database
-    let snaprag = SnapRag::new(config).await?;
-    let database = snaprag.database().clone();
+    let redis_cfg = config.redis.as_ref().ok_or_else(|| {
+        crate::SnapRagError::Custom("Redis configuration is required for hooks".to_string())
+    })?;
+    let redis = RedisClient::connect(redis_cfg)?;
 
-    // Create hook manager
+    // Create hook manager (local matching + execution)
     let hook_manager = Arc::new(HookManager::new());
     hook_manager.register_hook(hook_config.clone()).await;
 
     println!("✅ Hook registered successfully!");
     println!();
-    println!("🚀 Starting sync with hook enabled...");
+    println!("🚀 Starting hook consumer...");
     println!();
 
-    // Create sync service with hook manager
-    let sync_service = Arc::new(
-        crate::sync::service::SyncService::new_with_hooks(
-            config,
-            database,
-            Some(hook_manager.clone()),
-        )
-        .await?,
-    );
-
-    // Start sync
-    sync_service.start().await?;
+    let hook_queue = HookQueue::new(redis);
 
     // Keep running
-    println!("⏳ Sync running with hooks active. Press Ctrl+C to stop.");
+    println!("⏳ Hook consumer running. Press Ctrl+C to stop.");
     println!();
 
-    // Wait for interrupt
-    tokio::signal::ctrl_c().await?;
-    println!("\n🛑 Stopping sync...");
+    let shutdown = tokio::signal::ctrl_c();
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            _ = &mut shutdown => {
+                println!("\n🛑 Stopping hook consumer...");
+                break;
+            }
+            event = hook_queue.pop(std::time::Duration::from_secs(5)) => {
+                match event {
+                    Ok(Some(event)) => {
+                        hook_manager.check_and_trigger(&event).await;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::warn!("Hook queue pop error: {}", e);
+                    }
+                }
+            }
+        }
+    }
 
-    sync_service.stop(false).await?;
-
-    println!("✅ Sync stopped.");
+    println!("✅ Hook consumer stopped.");
 
     Ok(())
 }

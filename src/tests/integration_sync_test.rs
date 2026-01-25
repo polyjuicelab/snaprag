@@ -85,7 +85,6 @@ fn check_service_connectivity(endpoint: &str) -> bool {
 }
 
 /// Integration tests must run with real services - no skipping allowed
-
 /// Run an integration test with timeout to prevent hanging
 async fn run_integration_test_with_timeout<F, Fut>(test_name: &str, test_fn: F) -> Result<()>
 where
@@ -339,9 +338,9 @@ async fn test_sync_user_message_blocks() -> Result<()> {
         }
 
         // Test sync with known user message blocks
-        // Based on our analysis: blocks 1250000-1250100 contain user messages
-        let test_from_block = 1250000;
-        let test_to_block = 1250005; // Small range for testing
+        // Based on our analysis: blocks 1_250_000-1_250_100 contain user messages
+        let test_from_block = 1_250_000;
+        let test_to_block = 1_250_005; // Small range for testing
 
         // Testing sync with strict validation
 
@@ -399,7 +398,7 @@ async fn test_sync_user_message_blocks() -> Result<()> {
     .await
 }
 
-/// Test sync with high activity blocks (5000000+)
+/// Test sync with high activity blocks (5_000_000+)
 #[tokio::test]
 #[ignore = "Requires database access - production database should not be modified"]
 async fn test_sync_high_activity_blocks() -> Result<()> {
@@ -426,9 +425,9 @@ async fn test_sync_high_activity_blocks() -> Result<()> {
             lock_manager.remove_lock()?;
         }
 
-        // Test with high activity range: 5000000-5000005
-        let test_from_block = 5000000;
-        let test_to_block = 5000005;
+        // Test with high activity range: 5_000_000-5_000_005
+        let test_from_block = 5_000_000;
+        let test_to_block = 5_000_005;
 
         // Testing high activity sync with strict validation
 
@@ -605,8 +604,8 @@ async fn test_lock_file_management() -> Result<()> {
         }
 
         // Test sync with small range
-        let test_from_block = 1250000;
-        let test_to_block = 1250001;
+        let test_from_block = 1_250_000;
+        let test_to_block = 1_250_001;
 
         // Testing lock file management with strict validation
 
@@ -860,9 +859,9 @@ async fn test_scan_for_user_data_blocks() -> Result<()> {
     // Scan ranges to find UserDataAdd messages
     // Focus on a smaller range first to test
     let scan_ranges = vec![
-        (1250000, 1260000, 100),  // Known range with messages
-        (1000000, 1100000, 5000), // Earlier
-        (1500000, 1600000, 5000), // Later
+        (1_250_000, 1_260_000, 100),   // Known range with messages
+        (1_000_000, 1_100_000, 5_000), // Earlier
+        (1_500_000, 1_600_000, 5_000), // Later
     ];
 
     let mut blocks_with_user_data = Vec::new();

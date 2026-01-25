@@ -8,6 +8,10 @@ use crate::tests::strict_test_config;
 mod tests {
     use super::*;
 
+    strict_test!(strict_test_macro_example, async {
+        assert_eq!(2 + 2, 4);
+    });
+
     #[test]
     fn test_strict_config_initialization() {
         // This test verifies that strict test configuration can be initialized
@@ -55,13 +59,5 @@ mod tests {
                 "Should NOT detect as generated code warning: {warning}"
             );
         }
-    }
-
-    #[test]
-    fn test_strict_test_macro() {
-        // Test that the strict test macro works
-        strict_test!(test_example, async {
-            assert_eq!(2 + 2, 4);
-        });
     }
 }

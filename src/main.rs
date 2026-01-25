@@ -542,6 +542,7 @@ async fn main() -> Result<()> {
             ServeCommands::Hook {
                 event_type,
                 url,
+                func_hook,
                 regex,
                 fid,
                 target_fid,
@@ -555,6 +556,7 @@ async fn main() -> Result<()> {
                     fid,
                     target_fid,
                     onchain_event_type,
+                    func_hook,
                 )
                 .await?;
             }

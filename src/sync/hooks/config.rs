@@ -3,6 +3,8 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::func_hook::FuncHookType;
+
 /// Hub event types that can be hooked
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 pub enum EventType {
@@ -60,7 +62,9 @@ pub struct HookConfig {
     /// On-chain event type (only used when event_type is OnChain)
     pub onchain_event_type: Option<OnChainEventType>,
     /// Webhook URL to call when event matches
-    pub webhook_url: String,
+    pub webhook_url: Option<String>,
+    /// Optional function hook to execute when event matches
+    pub func_hook: Option<FuncHookType>,
     /// Optional regex filter for text matching
     pub regex_filter: Option<String>,
     /// Optional FID filter
@@ -73,16 +77,18 @@ impl HookConfig {
     /// Create a new hook configuration
     pub fn new(
         event_type: EventType,
-        webhook_url: String,
+        webhook_url: Option<String>,
         regex_filter: Option<String>,
         fid_filter: Option<i64>,
         target_fid_filter: Option<i64>,
         onchain_event_type: Option<OnChainEventType>,
+        func_hook: Option<FuncHookType>,
     ) -> Self {
         Self {
             event_type,
             onchain_event_type,
             webhook_url,
+            func_hook,
             regex_filter,
             fid_filter,
             target_fid_filter,
