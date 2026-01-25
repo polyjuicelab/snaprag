@@ -20,7 +20,7 @@ mod real_data_tests {
     /// 2. Database properly initialized
     /// 3. Valid authentication/credentials
     #[tokio::test]
-    #[ignore] // Ignored by default as it requires Snapchain setup
+    #[ignore = "Ignored by default as it requires Snapchain setup"]
     async fn test_sync_real_data_from_snapchain() -> Result<()> {
         // Load configuration
         let config = crate::tests::load_test_config()?;
@@ -60,7 +60,7 @@ mod real_data_tests {
 
     /// Test fetching a specific user profile from Snapchain
     #[tokio::test]
-    #[ignore] // Ignored by default as it requires Snapchain setup
+    #[ignore = "Ignored by default as it requires Snapchain setup"]
     async fn test_fetch_real_user_profile() -> Result<()> {
         use crate::sync::lazy_loader::LazyLoader;
 
@@ -86,7 +86,7 @@ mod real_data_tests {
 
     /// Test fetching real casts from Snapchain
     #[tokio::test]
-    #[ignore] // Ignored by default as it requires Snapchain setup
+    #[ignore = "Ignored by default as it requires Snapchain setup"]
     async fn test_fetch_real_user_casts() -> Result<()> {
         use crate::sync::lazy_loader::LazyLoader;
 
@@ -117,7 +117,7 @@ mod real_data_tests {
 
     /// Test end-to-end: sync, query, and verify data consistency
     #[tokio::test]
-    #[ignore] // Ignored by default as it requires Snapchain setup and takes time
+    #[ignore = "Ignored by default as it requires Snapchain setup and takes time"]
     async fn test_end_to_end_sync_and_query() -> Result<()> {
         let config = crate::tests::load_test_config()?;
         let database = std::sync::Arc::new(Database::from_config(&config).await?);

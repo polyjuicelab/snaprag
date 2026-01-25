@@ -153,7 +153,7 @@ mod tests {
         let uri = Uri::from_static("/api/profiles/123?limit=10");
         let method = &Method::GET;
         let body_hash = "";
-        let timestamp = 1234567890;
+        let timestamp = 1_234_567_890;
 
         let sig_string = build_signature_string(method, &uri, body_hash, timestamp);
         let expected = "GET\n/api/profiles/123\nlimit=10\n\n1234567890";

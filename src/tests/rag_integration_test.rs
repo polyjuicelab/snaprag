@@ -26,7 +26,7 @@ use crate::rag::ContextAssembler;
 use crate::rag::Retriever;
 
 #[tokio::test]
-#[ignore] // Requires external services (DB, embeddings, LLM)
+#[ignore = "Requires external services (DB, embeddings, LLM)"]
 async fn test_profile_rag_pipeline() -> Result<()> {
     // Load config
     let config = crate::tests::load_test_config()?;
@@ -110,7 +110,7 @@ async fn test_profile_rag_pipeline() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore] // Requires external services (DB, embeddings, LLM)
+#[ignore = "Requires external services (DB, embeddings, LLM)"]
 async fn test_cast_rag_pipeline() -> Result<()> {
     // Load config
     let config = crate::tests::load_test_config()?;
@@ -212,7 +212,7 @@ async fn test_cast_rag_pipeline() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore] // Requires external services (DB, embeddings, LLM)
+#[ignore = "Requires external services (DB, embeddings, LLM)"]
 async fn test_hybrid_search_quality() -> Result<()> {
     // Load config
     let config = crate::tests::load_test_config()?;
@@ -269,7 +269,7 @@ async fn test_hybrid_search_quality() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore] // Requires external services (DB, embeddings, LLM)
+#[ignore = "Requires external services (DB, embeddings, LLM)"]
 async fn test_retrieval_consistency() -> Result<()> {
     // This test verifies that retrieval is deterministic and consistent
     let config = crate::tests::load_test_config()?;
@@ -302,7 +302,7 @@ async fn test_retrieval_consistency() -> Result<()> {
 }
 
 #[tokio::test]
-#[ignore] // Requires external services
+#[ignore = "Requires external services"]
 async fn test_cast_thread_retrieval() -> Result<()> {
     // Test retrieving and assembling cast threads
     let config = crate::tests::load_test_config()?;

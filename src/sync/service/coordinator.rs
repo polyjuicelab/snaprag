@@ -9,6 +9,7 @@ use super::state::ChunkProcessStats;
 use crate::database::Database;
 use crate::sync::client::proto;
 use crate::sync::client::SnapchainClient;
+use crate::sync::hooks::HookManager;
 use crate::sync::shard_processor::ShardProcessor;
 use crate::Result;
 
@@ -16,11 +17,28 @@ use crate::Result;
 pub struct SyncCoordinator {
     client: SnapchainClient,
     database: Arc<Database>,
+    hook_manager: Option<Arc<HookManager>>,
 }
 
 impl SyncCoordinator {
     pub const fn new(client: SnapchainClient, database: Arc<Database>) -> Self {
-        Self { client, database }
+        Self {
+            client,
+            database,
+            hook_manager: None,
+        }
+    }
+
+    pub fn with_hooks(
+        client: SnapchainClient,
+        database: Arc<Database>,
+        hook_manager: Arc<HookManager>,
+    ) -> Self {
+        Self {
+            client,
+            database,
+            hook_manager: Some(hook_manager),
+        }
     }
 
     /// Poll once for a specific shard and block
@@ -41,8 +59,13 @@ impl SyncCoordinator {
                     chunk_count, shard_id, block_number
                 );
 
-                let mut stats =
-                    process_shard_chunks(&self.database, shard_id, response.shard_chunks).await?;
+                let mut stats = process_shard_chunks(
+                    &self.database,
+                    shard_id,
+                    response.shard_chunks,
+                    self.hook_manager.clone(),
+                )
+                .await?;
 
                 if stats.blocks_processed() == 0 {
                     stats.blocks_processed = 1;
@@ -95,8 +118,13 @@ impl SyncCoordinator {
                 let chunk_count = response.shard_chunks.len();
                 info!("   ↳ Fetched {} chunks from server", chunk_count);
 
-                let stats =
-                    process_shard_chunks(&self.database, shard_id, response.shard_chunks).await?;
+                let stats = process_shard_chunks(
+                    &self.database,
+                    shard_id,
+                    response.shard_chunks,
+                    self.hook_manager.clone(),
+                )
+                .await?;
 
                 info!(
                     "   ✓ Completed blocks {} to {} → {} messages, {} blocks processed",
@@ -126,9 +154,14 @@ async fn process_shard_chunks(
     database: &Database,
     shard_id: u32,
     chunks: Vec<proto::ShardChunk>,
+    hook_manager: Option<Arc<HookManager>>,
 ) -> Result<ChunkProcessStats> {
     let mut stats = ChunkProcessStats::default();
-    let processor = ShardProcessor::new(database.clone());
+    let processor = if let Some(hm) = hook_manager {
+        ShardProcessor::with_hooks(database.clone(), hm)
+    } else {
+        ShardProcessor::new(database.clone())
+    };
 
     for chunk in chunks {
         let block_number = extract_block_number(&chunk);
