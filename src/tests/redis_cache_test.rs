@@ -43,7 +43,7 @@ fn create_test_redis_client() -> Option<Arc<RedisClient>> {
 }
 
 /// Helper to clean up test data
-async fn cleanup_test_data(redis: &RedisClient, prefix: &str) {
+fn cleanup_test_data(redis: &RedisClient, prefix: &str) {
     // Note: In a real test, we'd use SCAN and DEL, but for simplicity
     // we'll just use a test namespace that can be cleared
     let _ = redis;
@@ -101,7 +101,7 @@ async fn test_cache_set_and_get_fresh() {
         _ => panic!("Expected Fresh cache result, got {:?}", result),
     }
 
-    cleanup_test_data(&redis, "cache:profile").await;
+    cleanup_test_data(&redis, "cache:profile");
 }
 
 #[tokio::test]

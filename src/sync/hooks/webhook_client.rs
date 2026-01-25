@@ -48,8 +48,10 @@ impl WebhookClient {
                         status, error_text, attempt, MAX_RETRIES
                     );
                     if attempt < MAX_RETRIES {
-                        tokio::time::sleep(Duration::from_millis(RETRY_DELAY_MS * attempt as u64))
-                            .await;
+                        tokio::time::sleep(Duration::from_millis(
+                            RETRY_DELAY_MS * u64::from(attempt),
+                        ))
+                        .await;
                         continue;
                     }
                     return Err(crate::SnapRagError::Custom(format!(
@@ -63,8 +65,10 @@ impl WebhookClient {
                         e, attempt, MAX_RETRIES
                     );
                     if attempt < MAX_RETRIES {
-                        tokio::time::sleep(Duration::from_millis(RETRY_DELAY_MS * attempt as u64))
-                            .await;
+                        tokio::time::sleep(Duration::from_millis(
+                            RETRY_DELAY_MS * u64::from(attempt),
+                        ))
+                        .await;
                         continue;
                     }
                     return Err(crate::SnapRagError::Custom(format!(

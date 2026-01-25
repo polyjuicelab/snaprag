@@ -1,17 +1,22 @@
-//! Binary to find real UsernameProof and FrameAction examples from recent blocks
+//! Binary to find real `UsernameProof` and `FrameAction` examples from recent blocks
 //!
-//! Usage: cargo run --bin find_username_proofs_and_frames
+//! Usage: cargo run --bin `find_username_proofs_and_frames`
 //!
 //! This script:
 //! 1. Gets the latest block heights from all shards
 //! 2. Fetches the most recent blocks (trunks)
-//! 3. Searches for MessageType 12 (UsernameProof) and MessageType 13 (FrameAction)
+//! 3. Searches for `MessageType` 12 (`UsernameProof`) and `MessageType` 13 (`FrameAction`)
 //! 4. Extracts example data and creates test fixtures
 
 use snaprag::sync::client::SnapchainClient;
 use snaprag::AppConfig;
 use snaprag::Result;
 
+#[allow(
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines,
+    clippy::uninlined_format_args
+)]
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("🔍 Searching for UsernameProof and FrameAction examples...");

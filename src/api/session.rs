@@ -217,7 +217,7 @@ impl SessionManager {
     /// # Errors
     ///
     /// Returns error if Redis operation fails
-    pub async fn session_count(&self) -> crate::Result<usize> {
+    pub fn session_count(&self) -> crate::Result<usize> {
         // For now, return 0 as counting requires scanning all keys
         // Could implement a counter in Redis if needed
         Ok(0)

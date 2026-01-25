@@ -9,16 +9,25 @@
 //!   --testnet
 //! ```
 
+#[cfg(feature = "payment")]
 use std::sync::Arc;
+#[cfg(feature = "payment")]
 use std::time::Duration;
 
+#[cfg(feature = "payment")]
 use clap::Parser;
+#[cfg(feature = "payment")]
 use ethers::prelude::*;
+#[cfg(feature = "payment")]
 use ethers::providers::Http;
+#[cfg(feature = "payment")]
 use ethers::providers::Provider;
+#[cfg(feature = "payment")]
 use ethers::types::Address;
+#[cfg(feature = "payment")]
 use ethers::types::U256;
 
+#[cfg(feature = "payment")]
 #[derive(Parser)]
 #[command(name = "payment_monitor")]
 #[command(about = "Monitor USDC payments in real-time")]
@@ -37,6 +46,7 @@ struct Args {
 }
 
 // USDC balanceOf ABI
+#[cfg(feature = "payment")]
 abigen!(
     IERC20,
     r#"[
@@ -46,6 +56,7 @@ abigen!(
     ]"#
 );
 
+#[cfg(feature = "payment")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -164,7 +175,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+#[cfg(not(feature = "payment"))]
+fn main() {
+    eprintln!(
+        "This example requires the `payment` feature. Re-run with: cargo run --example payment_monitor --features payment -- <args>"
+    );
+}
+
 /// Format balance with decimals
+#[cfg(feature = "payment")]
 fn format_balance(balance: U256, decimals: u8) -> String {
     let divisor = U256::from(10u128.pow(decimals as u32));
     let whole = balance / divisor;

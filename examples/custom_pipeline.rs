@@ -1,6 +1,6 @@
 //! Custom RAG pipeline example
 //!
-//! Run with: cargo run --example custom_pipeline
+//! Run with: cargo run --example `custom_pipeline`
 
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 1: Retrieve casts
     let query = "What are people saying about Warpcast?";
-    println!("🔍 Searching: {}\n", query);
+    println!("🔍 Searching: {query}\n");
 
     let casts = cast_retriever.semantic_search(query, 10, Some(0.7)).await?;
 
@@ -40,10 +40,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             cast.similarity * 100.0
         );
         println!("   {}", &cast.text[..cast.text.len().min(100)]);
-        println!(
-            "   📊 {} replies, {} reactions\n",
-            cast.reply_count, cast.reaction_count
-        );
+        let replies = cast.reply_count.unwrap_or(0);
+        let reactions = cast.reaction_count.unwrap_or(0);
+        println!("   📊 {replies} replies, {reactions} reactions\n");
     }
 
     // Step 3: Assemble context with author info

@@ -1,3 +1,6 @@
+#![allow(clippy::all)]
+#![allow(clippy::significant_drop_tightening, clippy::too_many_lines)]
+
 use clap::Parser;
 use snaprag::cli::CacheCommands;
 use snaprag::cli::CastCommands;

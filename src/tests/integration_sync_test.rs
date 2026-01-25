@@ -42,7 +42,7 @@ impl TestIsolationManager {
         }
     }
 
-    async fn setup(&mut self) -> Result<()> {
+    fn setup(&self) -> Result<()> {
         // Force cleanup before each test
         cleanup_all_snaprag_processes()?;
 
@@ -319,8 +319,8 @@ async fn test_sync_user_message_blocks() -> Result<()> {
         let _ = tracing_subscriber::fmt().with_env_filter("info").try_init();
 
         // Use test isolation manager for better cleanup
-        let mut isolation = TestIsolationManager::new("test_sync_user_message_blocks");
-        isolation.setup().await?;
+        let isolation = TestIsolationManager::new("test_sync_user_message_blocks");
+        isolation.setup()?;
 
         // Test initialization - no output needed
 

@@ -89,8 +89,10 @@ pub async fn get_content_style(
     top_emojis.truncate(20); // Top 20 emojis
 
     // Calculate average cast length
+    let total_casts_u32 = u32::try_from(total_casts).unwrap_or(u32::MAX);
+    let total_characters_u32 = u32::try_from(total_characters).unwrap_or(u32::MAX);
     let avg_cast_length = if total_casts > 0 {
-        total_characters as f64 / f64::from(total_casts)
+        f64::from(total_characters_u32) / f64::from(total_casts_u32)
     } else {
         0.0
     };
@@ -108,10 +110,11 @@ pub async fn get_content_style(
         }
     };
 
+    let total_characters_i64 = i64::try_from(total_characters).unwrap_or(i64::MAX);
     let response = ContentStyleResponse {
         top_emojis,
         avg_cast_length,
-        total_characters: total_characters as i64,
+        total_characters: total_characters_i64,
         frames_used,
         frames_created: 0,   // Not tracked yet
         channels_created: 0, // Not tracked yet
