@@ -1,4 +1,4 @@
-//! Example: Running SnapRAG API server with x402 payment support
+//! Example: Running `SnapRAG` API server with `x402` payment support
 //!
 //! This example demonstrates how to run the API server with payment enabled.
 //!

@@ -7,6 +7,7 @@ use snaprag::RagQuery;
 use snaprag::RetrievalMethod;
 use snaprag::SnapRag;
 
+#[allow(clippy::significant_drop_tightening)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AppConfig::load()?;

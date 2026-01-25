@@ -136,7 +136,6 @@ pub async fn get_annual_report(
         JobResult::AlreadyExists(status) => {
             let message = match status.as_str() {
                 "pending" => "Report generation is queued, please check back later",
-                "processing" => "Report generation in progress, please check back later",
                 "completed" => {
                     // Job completed but cache not updated yet - try to get result from status
                     if let Some(redis_cfg) = &state.config.redis {

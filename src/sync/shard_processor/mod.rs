@@ -1,9 +1,11 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use tracing::debug;
 
 use crate::database::Database;
 use crate::sync::client::proto::ShardChunk;
+use crate::sync::HookManager;
 use crate::Result;
 
 // Re-export submodules
@@ -25,6 +27,8 @@ pub struct ShardProcessor {
     fid_cache: std::sync::Mutex<HashSet<i64>>,
     // Cache for FIDs that have been registered (via id_register event)
     registered_fids: std::sync::Mutex<HashSet<i64>>,
+    // Optional hook manager for event callbacks
+    hook_manager: Option<Arc<HookManager>>,
 }
 
 impl ShardProcessor {
@@ -35,6 +39,18 @@ impl ShardProcessor {
             database,
             fid_cache: std::sync::Mutex::new(HashSet::new()),
             registered_fids: std::sync::Mutex::new(HashSet::new()),
+            hook_manager: None,
+        }
+    }
+
+    /// Create a new shard processor with hook manager
+    #[must_use]
+    pub fn with_hooks(database: Database, hook_manager: Arc<HookManager>) -> Self {
+        Self {
+            database,
+            fid_cache: std::sync::Mutex::new(HashSet::new()),
+            registered_fids: std::sync::Mutex::new(HashSet::new()),
+            hook_manager: Some(hook_manager),
         }
     }
 
@@ -81,6 +97,7 @@ impl ShardProcessor {
                     timestamp,
                     tx_idx,
                     &mut batched,
+                    self.hook_manager.as_ref(),
                 )
                 .await?;
             }
@@ -137,6 +154,7 @@ impl ShardProcessor {
                 timestamp,
                 tx_idx,
                 &mut batched,
+                self.hook_manager.as_ref(),
             )
             .await?;
         }

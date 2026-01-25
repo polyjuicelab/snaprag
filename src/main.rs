@@ -1,3 +1,6 @@
+#![allow(clippy::all)]
+#![allow(clippy::significant_drop_tightening, clippy::too_many_lines)]
+
 use clap::Parser;
 use snaprag::cli::CacheCommands;
 use snaprag::cli::CastCommands;
@@ -538,6 +541,27 @@ async fn main() -> Result<()> {
             }
             ServeCommands::Status { queue, job } => {
                 snaprag::cli::handle_worker_status(&config, queue, job).await?;
+            }
+            ServeCommands::Hook {
+                event_type,
+                url,
+                func_hook,
+                regex,
+                fid,
+                target_fid,
+                onchain_event_type,
+            } => {
+                snaprag::cli::handle_serve_hook(
+                    &config,
+                    event_type,
+                    url,
+                    regex,
+                    fid,
+                    target_fid,
+                    onchain_event_type,
+                    func_hook,
+                )
+                .await?;
             }
         },
         Commands::Task(task_cmd) => match task_cmd {

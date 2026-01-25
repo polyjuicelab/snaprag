@@ -6,7 +6,7 @@ use serde_json::json;
 const API_URL: &str = "http://127.0.0.1:3000";
 
 #[tokio::test]
-#[ignore] // Run with: cargo test --test api_tests -- --ignored --nocapture
+#[ignore = "Requires running API server (cargo test --test api_tests -- --ignored --nocapture)"]
 async fn test_health_endpoint() {
     let client = Client::new();
     let response = client
@@ -23,7 +23,7 @@ async fn test_health_endpoint() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "Requires running API server"]
 async fn test_stats_endpoint() {
     let client = Client::new();
     let response = client
@@ -44,7 +44,7 @@ async fn test_stats_endpoint() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "Requires running API server"]
 async fn test_mcp_tools() {
     let client = Client::new();
     let response = client
@@ -62,7 +62,7 @@ async fn test_mcp_tools() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "Requires running API server"]
 async fn test_mcp_resources() {
     let client = Client::new();
     let response = client
@@ -79,7 +79,7 @@ async fn test_mcp_resources() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "Requires running API server"]
 async fn test_all_free_endpoints() {
     println!("\n🧪 Testing all free endpoints...");
     println!("===================================\n");

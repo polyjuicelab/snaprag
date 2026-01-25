@@ -284,6 +284,46 @@ impl RedisClient {
         }
     }
 
+    /// Push a hook event onto a fixed-size queue
+    pub async fn push_hook_event(&self, event_json: &str, max_len: usize) -> crate::Result<()> {
+        let queue_key = self.key("hook_events");
+        let mut conn = self
+            .client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(|e| crate::SnapRagError::Custom(format!("Redis connect error: {e}")))?;
+
+        let max_len = isize::try_from(max_len.saturating_sub(1)).unwrap_or(999);
+        redis::pipe()
+            .lpush(&queue_key, event_json)
+            .ignore()
+            .ltrim(&queue_key, 0, max_len)
+            .query_async::<()>(&mut conn)
+            .await
+            .map_err(|e| {
+                crate::SnapRagError::Custom(format!("Redis hook queue push error: {e}"))
+            })?;
+
+        Ok(())
+    }
+
+    /// Pop a hook event from the queue (blocking with timeout)
+    pub async fn pop_hook_event(&self, timeout: Duration) -> crate::Result<Option<String>> {
+        let queue_key = self.key("hook_events");
+        let mut conn = self
+            .client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(|e| crate::SnapRagError::Custom(format!("Redis connect error: {e}")))?;
+
+        let result: Option<(String, String)> = conn
+            .brpop(&queue_key, timeout.as_secs() as f64)
+            .await
+            .map_err(|e| crate::SnapRagError::Custom(format!("Redis hook queue pop error: {e}")))?;
+
+        Ok(result.map(|(_, payload)| payload))
+    }
+
     /// Pop a job from multiple queues (blocking, returns first available)
     /// Returns (queue_name, job_id, job_data) if a job is found
     pub async fn pop_job_from_queues(
