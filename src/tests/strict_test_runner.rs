@@ -46,7 +46,7 @@ impl StrictTestRunner {
     }
 
     /// Run all strict checks and tests
-    pub async fn run_all(&self) -> Result<()> {
+    pub fn run_all(&self) -> Result<()> {
         // Step 1: Code formatting check
         if self.config.check_formatting {
             self.check_formatting()?;
@@ -58,7 +58,7 @@ impl StrictTestRunner {
         }
 
         // Step 3: Run tests with strict settings
-        self.run_tests().await?;
+        self.run_tests()?;
 
         Ok(())
     }
@@ -115,7 +115,7 @@ impl StrictTestRunner {
     }
 
     /// Run tests with strict settings
-    async fn run_tests(&self) -> Result<()> {
+    fn run_tests(&self) -> Result<()> {
         let mut args = vec!["test", "--lib"];
 
         if !self.config.parallel {
@@ -166,7 +166,7 @@ impl StrictTestRunner {
     }
 
     /// Run a specific test with strict settings
-    pub async fn run_test(&self, test_name: &str) -> Result<()> {
+    pub fn run_test(&self, test_name: &str) -> Result<()> {
         let mut cmd = Command::new("cargo");
         cmd.args(["test", "--lib", test_name, "--", "--test-threads", "1"])
             .env("RUST_BACKTRACE", "1")
@@ -189,15 +189,15 @@ impl StrictTestRunner {
 }
 
 /// Helper function to run all strict tests
-pub async fn run_strict_tests() -> Result<()> {
+pub fn run_strict_tests() -> Result<()> {
     let config = StrictTestConfig::default();
     let runner = StrictTestRunner::new(config);
-    runner.run_all().await
+    runner.run_all()
 }
 
 /// Helper function to run a specific test with strict settings
-pub async fn run_strict_test(test_name: &str) -> Result<()> {
+pub fn run_strict_test(test_name: &str) -> Result<()> {
     let config = StrictTestConfig::default();
     let runner = StrictTestRunner::new(config);
-    runner.run_test(test_name).await
+    runner.run_test(test_name)
 }

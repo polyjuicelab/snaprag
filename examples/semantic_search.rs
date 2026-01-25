@@ -1,10 +1,11 @@
 //! Semantic search example
 //!
-//! Run with: cargo run --example semantic_search
+//! Run with: cargo run --example `semantic_search`
 
 use snaprag::AppConfig;
 use snaprag::SnapRag;
 
+#[allow(clippy::significant_drop_tightening)]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AppConfig::load()?;
@@ -44,10 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             cast.similarity * 100.0
         );
         println!("    {}", &cast.text[..cast.text.len().min(100)]);
-        println!(
-            "    📈 {} replies, {} reactions\n",
-            cast.reply_count, cast.reaction_count
-        );
+        let replies = cast.reply_count.unwrap_or(0);
+        let reactions = cast.reaction_count.unwrap_or(0);
+        println!("    📈 {replies} replies, {reactions} reactions\n");
     }
 
     Ok(())

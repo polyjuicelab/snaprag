@@ -7,7 +7,6 @@
 /// 4. Handle edge cases (removes, updates, etc.)
 ///
 /// Each test cleans up its data after execution to ensure test isolation.
-
 #[cfg(test)]
 #[allow(clippy::unreadable_literal)] // Test data with large numbers is acceptable
 mod message_types_tests {

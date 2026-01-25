@@ -1,6 +1,11 @@
+use std::sync::Arc;
+
 use super::super::types::BatchedData;
 /// System message handler (`OnChain` Events)
 use crate::models::ShardBlockInfo;
+use crate::sync::hooks::EventData;
+use crate::sync::hooks::EventType;
+use crate::sync::hooks::HookManager;
 use crate::Result;
 
 /// Process system messages (`OnChainEvents`)
@@ -8,6 +13,7 @@ pub(in crate::sync::shard_processor) async fn process_system_message(
     system_msg: &crate::sync::client::proto::ValidatorMessage,
     shard_block_info: &ShardBlockInfo,
     batched: &mut BatchedData,
+    hook_manager: Option<&Arc<HookManager>>,
 ) -> Result<()> {
     // System messages contain OnChainEvents (id_register, storage_rent, etc.)
     if let Some(onchain_event) = &system_msg.on_chain_event {
@@ -35,6 +41,9 @@ pub(in crate::sync::shard_processor) async fn process_system_message(
         // Serialize event body to JSON for storage
         let event_data = serde_json::to_value(onchain_event).unwrap_or(serde_json::Value::Null);
 
+        // Clone event_data for hook before moving it to batched
+        let event_data_for_hook = event_data.clone();
+
         batched.onchain_events.push((
             fid,
             event_type,
@@ -53,6 +62,19 @@ pub(in crate::sync::shard_processor) async fn process_system_message(
             event_type,
             block_number
         );
+
+        // Trigger hook for MERGE_ON_CHAIN_EVENT
+        if let Some(hm) = hook_manager {
+            let hook_event_data = EventData {
+                event_type: EventType::MergeOnChainEvent,
+                fid,
+                target_fid: None,
+                timestamp: block_timestamp,
+                data: event_data_for_hook,
+                text: None,
+            };
+            hm.check_and_trigger(&hook_event_data).await;
+        }
     } else {
         tracing::warn!(
             "System message in shard {} has no onchain_event",
