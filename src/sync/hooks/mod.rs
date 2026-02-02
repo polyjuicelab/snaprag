@@ -88,8 +88,23 @@ impl HookManager {
     /// Check if any hooks match the given event and trigger webhooks
     pub async fn check_and_trigger(&self, event: &EventData) {
         if let Some(queue) = &self.queue {
-            if let Err(e) = queue.enqueue(event).await {
-                tracing::error!("Failed to enqueue hook event: {}", e);
+            match queue.enqueue(event).await {
+                Ok(()) => {
+                    let text_preview = event
+                        .text
+                        .as_deref()
+                        .map(|s| if s.len() > 60 { format!("{}...", &s[..60]) } else { s.to_string() })
+                        .unwrap_or_else(|| "-".to_string());
+                    tracing::info!(
+                        event_type = ?event.event_type,
+                        fid = event.fid,
+                        text = %text_preview,
+                        "hook event pushed to queue"
+                    );
+                }
+                Err(e) => {
+                    tracing::error!("Failed to enqueue hook event: {}", e);
+                }
             }
             return;
         }
