@@ -93,7 +93,13 @@ impl HookManager {
                     let text_preview = event
                         .text
                         .as_deref()
-                        .map(|s| if s.len() > 60 { format!("{}...", &s[..60]) } else { s.to_string() })
+                        .map(|s| {
+                            if s.len() > 60 {
+                                format!("{}...", &s[..60])
+                            } else {
+                                s.to_string()
+                            }
+                        })
                         .unwrap_or_else(|| "-".to_string());
                     tracing::info!(
                         event_type = ?event.event_type,
