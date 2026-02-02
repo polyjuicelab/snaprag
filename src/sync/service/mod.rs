@@ -112,6 +112,7 @@ impl SyncService {
             state.clone(),
             state_manager.clone(),
             lock_manager.clone(),
+            hook_manager.clone(),
         );
 
         let coordinator = if let Some(hm) = hook_manager.clone() {
