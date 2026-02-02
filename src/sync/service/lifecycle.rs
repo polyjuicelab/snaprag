@@ -9,6 +9,7 @@ use super::state::ChunkProcessStats;
 use crate::config::AppConfig;
 use crate::database::Database;
 use crate::sync::client::SnapchainClient;
+use crate::sync::hooks::HookManager;
 use crate::sync::lock_file::SyncLockFile;
 use crate::sync::lock_file::SyncLockManager;
 use crate::sync::lock_file::SyncRange;
@@ -26,6 +27,7 @@ pub struct LifecycleManager {
     state: Arc<tokio::sync::RwLock<SyncState>>,
     state_manager: Arc<tokio::sync::RwLock<SyncStateManager>>,
     lock_manager: SyncLockManager,
+    hook_manager: Option<Arc<HookManager>>,
 }
 
 impl LifecycleManager {
@@ -36,6 +38,7 @@ impl LifecycleManager {
         state: Arc<tokio::sync::RwLock<SyncState>>,
         state_manager: Arc<tokio::sync::RwLock<SyncStateManager>>,
         lock_manager: SyncLockManager,
+        hook_manager: Option<Arc<HookManager>>,
     ) -> Self {
         Self {
             config,
@@ -44,6 +47,15 @@ impl LifecycleManager {
             state,
             state_manager,
             lock_manager,
+            hook_manager,
+        }
+    }
+
+    fn processor(&self, database: &Database) -> ShardProcessor {
+        if let Some(ref hm) = self.hook_manager {
+            ShardProcessor::with_hooks(database.clone(), hm.clone())
+        } else {
+            ShardProcessor::new(database.clone())
         }
     }
 
@@ -196,6 +208,7 @@ impl LifecycleManager {
             let state_manager = self.state_manager.clone();
             let config = self.config.clone();
             let lock_manager = self.lock_manager.clone();
+            let hook_manager = self.hook_manager.clone();
 
             // Spawn parallel task for this shard
             let handle = tokio::spawn(async move {
@@ -254,7 +267,11 @@ impl LifecycleManager {
                                 break;
                             }
 
-                            let processor = ShardProcessor::new(database.as_ref().clone());
+                            let processor = if let Some(ref hm) = hook_manager {
+                                ShardProcessor::with_hooks(database.as_ref().clone(), hm.clone())
+                            } else {
+                                ShardProcessor::new(database.as_ref().clone())
+                            };
                             processor.process_chunks_batch(&chunks, shard_id).await?;
 
                             // Update stats
@@ -361,9 +378,11 @@ impl LifecycleManager {
             let client = self.client.clone();
             let database = self.database.clone();
             let state_manager = self.state_manager.clone();
+            let hook_manager = self.hook_manager.clone();
 
             tokio::spawn(async move {
-                Self::run_continuous_sync(config, client, database, state_manager).await;
+                Self::run_continuous_sync(config, client, database, state_manager, hook_manager)
+                    .await;
             });
         } else {
             info!("Real-time sync not yet implemented in refactored service");
@@ -443,6 +462,7 @@ impl LifecycleManager {
             let client = self.client.clone();
             let database = self.database.clone();
             let config = self.config.clone();
+            let hook_manager = self.hook_manager.clone();
 
             // Spawn shard coordinator
             let handle = tokio::spawn(async move {
@@ -521,6 +541,7 @@ impl LifecycleManager {
 
                     let client = client.clone();
                     let database = database.clone();
+                    let hook_manager = hook_manager.clone();
                     let should_stop_shared = should_stop.clone();
                     let completed_batches_shared = completed_batches.clone();
 
@@ -555,7 +576,15 @@ impl LifecycleManager {
                                     if !chunks.is_empty() {
                                         // 📊 Measure processing time
                                         let process_start = std::time::Instant::now();
-                                        match ShardProcessor::new(database.as_ref().clone())
+                                        let processor = if let Some(ref hm) = hook_manager {
+                                            ShardProcessor::with_hooks(
+                                                database.as_ref().clone(),
+                                                hm.clone(),
+                                            )
+                                        } else {
+                                            ShardProcessor::new(database.as_ref().clone())
+                                        };
+                                        match processor
                                             .process_chunks_batch(&chunks, shard_id)
                                             .await
                                         {
@@ -907,8 +936,9 @@ impl LifecycleManager {
             let client = self.client.clone();
             let database = self.database.clone();
             let state_manager = self.state_manager.clone();
+            let hook_manager = self.hook_manager.clone();
 
-            Self::run_continuous_sync(config, client, database, state_manager).await;
+            Self::run_continuous_sync(config, client, database, state_manager, hook_manager).await;
         } else if to_block == u64::MAX {
             info!("⚠️  Continuous sync is disabled. Enable it in config to automatically sync new blocks.");
         } else {
@@ -924,6 +954,7 @@ impl LifecycleManager {
         client: crate::sync::client::SnapchainClient,
         database: Arc<crate::database::Database>,
         state_manager: Arc<tokio::sync::RwLock<crate::sync::state_manager::SyncStateManager>>,
+        hook_manager: Option<Arc<HookManager>>,
     ) {
         use tracing::error;
         use tracing::info;
@@ -940,8 +971,14 @@ impl LifecycleManager {
 
             // Check each shard for new blocks
             for &shard_id in &config.shard_ids {
-                match Self::check_and_sync_new_blocks(shard_id, &client, &database, &state_manager)
-                    .await
+                match Self::check_and_sync_new_blocks(
+                    shard_id,
+                    &client,
+                    &database,
+                    &state_manager,
+                    hook_manager.clone(),
+                )
+                .await
                 {
                     Ok(blocks_synced) => {
                         if blocks_synced > 0 {
@@ -963,6 +1000,7 @@ impl LifecycleManager {
         client: &crate::sync::client::SnapchainClient,
         database: &Arc<crate::database::Database>,
         state_manager: &Arc<tokio::sync::RwLock<crate::sync::state_manager::SyncStateManager>>,
+        hook_manager: Option<Arc<HookManager>>,
     ) -> Result<u64> {
         use tracing::debug;
         use tracing::warn;
@@ -1019,9 +1057,11 @@ impl LifecycleManager {
                     }
 
                     // Process the chunks
-                    let processor = crate::sync::shard_processor::ShardProcessor::new(
-                        database.as_ref().clone(),
-                    );
+                    let processor = if let Some(ref hm) = hook_manager {
+                        ShardProcessor::with_hooks(database.as_ref().clone(), hm.clone())
+                    } else {
+                        ShardProcessor::new(database.as_ref().clone())
+                    };
 
                     match processor
                         .process_chunks_batch(&response.shard_chunks, shard_id)
