@@ -324,6 +324,36 @@ impl RedisClient {
         Ok(result.map(|(_, payload)| payload))
     }
 
+    /// Return the length of the hook event queue (for diagnostics).
+    pub async fn hook_queue_len(&self) -> crate::Result<u64> {
+        let queue_key = self.key("hook_events");
+        let mut conn = self
+            .client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(|e| crate::SnapRagError::Custom(format!("Redis connect error: {e}")))?;
+        let len: u64 = conn
+            .llen(&queue_key)
+            .await
+            .map_err(|e| crate::SnapRagError::Custom(format!("Redis LLEN error: {e}")))?;
+        Ok(len)
+    }
+
+    /// Peek up to `count` entries from the right (oldest) side of the hook queue (for diagnostics).
+    pub async fn hook_queue_peek(&self, count: isize) -> crate::Result<Vec<String>> {
+        let queue_key = self.key("hook_events");
+        let mut conn = self
+            .client
+            .get_multiplexed_tokio_connection()
+            .await
+            .map_err(|e| crate::SnapRagError::Custom(format!("Redis connect error: {e}")))?;
+        let items: Vec<String> = conn
+            .lrange(&queue_key, -count, -1)
+            .await
+            .map_err(|e| crate::SnapRagError::Custom(format!("Redis LRANGE error: {e}")))?;
+        Ok(items)
+    }
+
     /// Pop a job from multiple queues (blocking, returns first available)
     /// Returns (queue_name, job_id, job_data) if a job is found
     pub async fn pop_job_from_queues(
