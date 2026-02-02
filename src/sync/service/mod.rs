@@ -48,13 +48,20 @@ impl SyncService {
     pub async fn new(app_config: &AppConfig, database: Arc<Database>) -> Result<Self> {
         let hook_manager = if let Some(redis_cfg) = &app_config.redis {
             match crate::api::redis_client::RedisClient::connect(redis_cfg) {
-                Ok(redis) => Some(Arc::new(HookManager::new_with_queue(HookQueue::new(redis)))),
+                Ok(redis) => {
+                    info!(
+                        "Hook queue enabled: sync will push events to Redis (key: {}hook_events)",
+                        redis_cfg.namespace
+                    );
+                    Some(Arc::new(HookManager::new_with_queue(HookQueue::new(redis))))
+                }
                 Err(e) => {
                     warn!("Failed to initialize hook queue (redis): {}", e);
                     None
                 }
             }
         } else {
+            info!("Hook queue disabled: no [redis] in config; events will not be pushed");
             None
         };
 
