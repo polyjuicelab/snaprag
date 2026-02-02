@@ -268,10 +268,7 @@ impl LifecycleManager {
                             }
 
                             let processor = if let Some(ref hm) = hook_manager {
-                                ShardProcessor::with_hooks(
-                                    database.as_ref().clone(),
-                                    hm.clone(),
-                                )
+                                ShardProcessor::with_hooks(database.as_ref().clone(), hm.clone())
                             } else {
                                 ShardProcessor::new(database.as_ref().clone())
                             };
