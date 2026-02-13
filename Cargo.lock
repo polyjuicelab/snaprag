@@ -5033,7 +5033,7 @@ dependencies = [
  "stop-words",
  "tempfile",
  "textwrap",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokenizers",
  "tokio",
  "tokio-util",
