@@ -64,7 +64,7 @@ num_cpus = "1.0"  # CPU core detection for multi-process optimization
 home = "0.5.11"  # Compatible version for older Rust
 redis = { version = "0.27", features = ["tokio-comp"] }
 textwrap = "0.16"  # Text wrapping for CLI output
-stop-words = "0.8"  # Stop words for multiple languages
+stop-words = "0.9"  # Stop words for multiple languages
 lazy_static = "1.4"  # For static AFINN lexicon
 jsonwebtoken = { version = "10.1", features = ["aws_lc_rs"] }  # Force newer version to fix ring 0.16.20 security issue
 prometheus = { version = "0.13", features = ["process"] }  # Prometheus metrics for monitoring
